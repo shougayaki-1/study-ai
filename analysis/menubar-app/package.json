@@ -1,0 +1,38 @@
+{
+  "name": "study-ai-nightly-menubar",
+  "version": "1.0.0",
+  "description": "study-ai 夜間分析バッチを管理する macOS メニューバーアプリ",
+  "author": "study-ai",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.js",
+    "build": "electron-builder --mac dir"
+  },
+  "devDependencies": {
+    "electron": "^39.2.7",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.studyai.nightly-menubar",
+    "productName": "Study AI Nightly",
+    "asar": true,
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "lib/**/*",
+      "renderer/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "target": "dir",
+      "category": "public.app-category.productivity",
+      "identity": null
+    }
+  }
+}

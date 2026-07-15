@@ -14,6 +14,9 @@ study-ai の「Mac上のClaude Codeが毎晩ヘッドレス実行(`claude -p`)�
 - `.env.example` — 環境変数のテンプレート
 - `.env` — 実際の認証情報(**Gitにコミットしない**。各自で作成する)
 - `tmp/` — 実行時に画像やレポート下書きを一時保存する作業ディレクトリ(**Gitにコミットしない**)
+- `menubar-app/` — エンジン・スケジュール・手動実行・ログを管理するmacOSメニューバーアプリ
+
+メニューバーアプリの開発起動・ビルド手順は [`menubar-app/README.md`](menubar-app/README.md) を参照。
 
 ## 前提
 
