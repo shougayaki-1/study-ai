@@ -36,6 +36,7 @@ yarn-error.log*
 
 # analysis (Claude Code batch, service role key)
 analysis/.env
+analysis/tmp/
 
 # vercel
 .vercel
