@@ -14,7 +14,14 @@ export default function ThemeRegistry({
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      <Box sx={{ pb: 7 }}>{children}</Box>
+      <Box
+        sx={{
+          // Reserve the fixed bottom navigation and the device safe area.
+          pb: "calc(56px + env(safe-area-inset-bottom))",
+        }}
+      >
+        {children}
+      </Box>
       <BottomNav />
     </ThemeProvider>
   );

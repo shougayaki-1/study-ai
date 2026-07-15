@@ -35,12 +35,15 @@ export default function BottomNav() {
         right: 0,
         zIndex: 10,
         borderTop: "1px solid #eeeeee",
+        // Keep the navigation above the home indicator on notched devices.
+        pb: "env(safe-area-inset-bottom)",
       }}
     >
       <BottomNavigation
         showLabels
         value={current}
         onChange={(_, newValue) => router.push(newValue)}
+        sx={{ minHeight: 56 }}
       >
         {TABS.map((tab) => (
           <BottomNavigationAction
