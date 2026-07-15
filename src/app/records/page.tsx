@@ -30,7 +30,7 @@ type Session = {
   minutes: number; study_date: string; understanding: Understanding | null;
   record_type: RecordType; common_test_year: number | null; common_test_section: string | null;
 };
-type Named = { id: string; name: string; color?: string };
+type Named = { id: string; name: string; color?: string; subject_id?: string };
 type Result = { is_correct: boolean | null; created_at: string };
 const COMMON_TEST_SECTIONS = ["年度通し", ...Array.from({ length: 8 }, (_, index) => `大問${index + 1}`)];
 
