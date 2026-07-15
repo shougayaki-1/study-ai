@@ -28,6 +28,7 @@ import ArrowUpwardIcon from "@mui/icons-material/ArrowUpward";
 import ArrowDownwardIcon from "@mui/icons-material/ArrowDownward";
 import { createClient } from "@/lib/supabase/client";
 import { MATERIAL_KINDS } from "@/lib/constants";
+import { isPushSupported, urlBase64ToUint8Array } from "@/lib/push";
 
 export const dynamic = "force-dynamic";
 
@@ -47,6 +48,9 @@ export default function SettingsPage() {
   const [selectedSubjectId, setSelectedSubjectId] = useState<string>("");
 
   const [pushEnabled, setPushEnabled] = useState(false);
+  const [pushSupported, setPushSupported] = useState(false);
+  const [pushBusy, setPushBusy] = useState(false);
+  const [pushError, setPushError] = useState<string | null>(null);
 
   const [dialogKind, setDialogKind] = useState<"unit" | "material" | null>(null);
   const [newName, setNewName] = useState("");
@@ -86,6 +90,64 @@ export default function SettingsPage() {
     loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (!isPushSupported()) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setPushSupported(true);
+    navigator.serviceWorker.ready
+      .then((registration) => registration.pushManager.getSubscription())
+      .then((sub) => {
+        setPushEnabled(!!sub);
+      })
+      .catch(() => {
+        // 取得失敗時は未購読扱いのままにする
+      });
+  }, []);
+
+  const togglePush = async (checked: boolean) => {
+    setPushError(null);
+    setPushBusy(true);
+    try {
+      const registration = await navigator.serviceWorker.ready;
+
+      if (checked) {
+        const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+        if (!vapidPublicKey) {
+          throw new Error("VAPID公開鍵が設定されていません(.env.local を確認してください)");
+        }
+        const permission = await Notification.requestPermission();
+        if (permission !== "granted") {
+          throw new Error("通知が許可されませんでした");
+        }
+        const subscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
+        });
+        const json = subscription.toJSON();
+        const { error } = await supabase.from("push_subscriptions").upsert(
+          {
+            endpoint: json.endpoint,
+            keys_json: json.keys,
+          },
+          { onConflict: "endpoint" },
+        );
+        if (error) throw error;
+        setPushEnabled(true);
+      } else {
+        const subscription = await registration.pushManager.getSubscription();
+        if (subscription) {
+          await supabase.from("push_subscriptions").delete().eq("endpoint", subscription.endpoint);
+          await subscription.unsubscribe();
+        }
+        setPushEnabled(false);
+      }
+    } catch (e) {
+      setPushError(e instanceof Error ? e.message : "通知の設定に失敗しました");
+    } finally {
+      setPushBusy(false);
+    }
+  };
 
   const unitsForSubject = useMemo(
     () =>
@@ -320,15 +382,25 @@ export default function SettingsPage() {
             <Box>
               <Typography variant="subtitle2">通知(Push)</Typography>
               <Typography variant="caption" color="text.secondary">
-                締切リマインドと復習提案を毎朝通知(フェーズ3で実装)
+                締切リマインドと復習提案を毎朝通知
               </Typography>
             </Box>
             <Switch
               checked={pushEnabled}
-              onChange={(e) => setPushEnabled(e.target.checked)}
-              disabled
+              onChange={(e) => togglePush(e.target.checked)}
+              disabled={!pushSupported || pushBusy}
             />
           </Stack>
+          {!pushSupported && (
+            <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
+              このブラウザはPush通知に対応していません。iPhoneはホーム画面に追加してから利用してください。
+            </Typography>
+          )}
+          {pushError && (
+            <Alert severity="error" sx={{ mt: 1 }}>
+              {pushError}
+            </Alert>
+          )}
         </Paper>
       </Stack>
 
