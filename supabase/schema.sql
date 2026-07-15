@@ -50,6 +50,8 @@ create table if not exists study_sessions (
   minutes integer not null check (minutes > 0),
   study_date date not null default current_date,
   record_type text not null default 'material' check (record_type in ('common_test', 'secondary', 'material')),
+  common_test_year integer,
+  common_test_section text,
   understanding text check (understanding in ('understood', 'uncertain', 'not_understood')),
   batch_id uuid,
   started_at timestamptz not null default now(),
@@ -62,6 +64,10 @@ alter table study_sessions
   add column if not exists study_date date not null default current_date;
 alter table study_sessions
   add column if not exists record_type text not null default 'material';
+alter table study_sessions
+  add column if not exists common_test_year integer;
+alter table study_sessions
+  add column if not exists common_test_section text;
 alter table study_sessions
   add column if not exists understanding text;
 alter table study_sessions

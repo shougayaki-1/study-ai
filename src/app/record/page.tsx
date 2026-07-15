@@ -38,6 +38,8 @@ type Entry = {
   recordType: RecordType;
   minutes: number;
   understanding: Understanding;
+  commonTestYear: string;
+  commonTestSection: string;
 };
 type PreviousSession = { unit_id: string | null; understanding: Understanding | null };
 type SavedSummary = {
@@ -50,6 +52,8 @@ type SavedSummary = {
 };
 
 const TIME_OPTIONS = [30, 45, 60, 90];
+const COMMON_TEST_YEARS = Array.from({ length: new Date().getFullYear() - 2020 }, (_, index) => String(new Date().getFullYear() - index));
+const COMMON_TEST_SECTIONS = ["年度通し", ...Array.from({ length: 8 }, (_, index) => `大問${index + 1}`)];
 const DIFFICULTY_LABELS: Record<string, string> = { basic: "基礎", standard: "標準", advanced: "応用" };
 
 function todayString() {
@@ -66,6 +70,8 @@ function newEntry(subjectId = ""): Entry {
     recordType: "material",
     minutes: 60,
     understanding: "uncertain",
+    commonTestYear: String(new Date().getFullYear()),
+    commonTestSection: "年度通し",
   };
 }
 
@@ -144,6 +150,8 @@ export default function RecordPage() {
       minutes: entry.minutes,
       study_date: studyDate,
       record_type: entry.recordType,
+      common_test_year: entry.recordType === "common_test" ? Number(entry.commonTestYear) : null,
+      common_test_section: entry.recordType === "common_test" ? entry.commonTestSection : null,
       understanding: entry.understanding,
       batch_id: batchId,
     }));
@@ -267,19 +275,30 @@ export default function RecordPage() {
                 <TextField select label="科目" value={entry.subjectId} onChange={(event) => updateEntry(entry.key, { subjectId: event.target.value, unitId: "", materialId: "" })} size="small" fullWidth>
                   {subjects.map((subject) => <MenuItem key={subject.id} value={subject.id}>{subject.name}</MenuItem>)}
                 </TextField>
-                <Stack direction="row" spacing={1}>
-                  <TextField select label="単元" value={entry.unitId} onChange={(event) => updateEntry(entry.key, { unitId: event.target.value })} size="small" fullWidth>
-                    <MenuItem value="">未指定</MenuItem>
-                    {filteredUnits.map((unit) => <MenuItem key={unit.id} value={unit.id}>{unit.name}</MenuItem>)}
-                  </TextField>
-                  <TextField select label="教材" value={entry.materialId} onChange={(event) => updateEntry(entry.key, { materialId: event.target.value })} size="small" fullWidth>
-                    <MenuItem value="">未指定</MenuItem>
-                    {filteredMaterials.map((material) => <MenuItem key={material.id} value={material.id}>{material.name}・{DIFFICULTY_LABELS[material.difficulty]}</MenuItem>)}
-                  </TextField>
-                </Stack>
                 <ToggleButtonGroup exclusive fullWidth size="small" value={entry.recordType} onChange={(_, value: RecordType | null) => value && updateEntry(entry.key, { recordType: value })}>
                   {RECORD_TYPES.map(([value, label]) => <ToggleButton key={value} value={value}>{label}</ToggleButton>)}
                 </ToggleButtonGroup>
+                {entry.recordType === "common_test" ? (
+                  <Stack direction="row" spacing={1}>
+                    <TextField select label="年度" value={entry.commonTestYear} onChange={(event) => updateEntry(entry.key, { commonTestYear: event.target.value })} size="small" fullWidth>
+                      {COMMON_TEST_YEARS.map((year) => <MenuItem key={year} value={year}>{year}年度</MenuItem>)}
+                    </TextField>
+                    <TextField select label="大問" value={entry.commonTestSection} onChange={(event) => updateEntry(entry.key, { commonTestSection: event.target.value, unitId: "" })} size="small" fullWidth>
+                      {COMMON_TEST_SECTIONS.map((section) => <MenuItem key={section} value={section}>{section}</MenuItem>)}
+                    </TextField>
+                  </Stack>
+                ) : (
+                  <Stack direction="row" spacing={1}>
+                    <TextField select label="単元" value={entry.unitId} onChange={(event) => updateEntry(entry.key, { unitId: event.target.value })} size="small" fullWidth>
+                      <MenuItem value="">未指定</MenuItem>
+                      {filteredUnits.map((unit) => <MenuItem key={unit.id} value={unit.id}>{unit.name}</MenuItem>)}
+                    </TextField>
+                    <TextField select label="教材" value={entry.materialId} onChange={(event) => updateEntry(entry.key, { materialId: event.target.value })} size="small" fullWidth>
+                      <MenuItem value="">未指定</MenuItem>
+                      {filteredMaterials.map((material) => <MenuItem key={material.id} value={material.id}>{material.name}・{DIFFICULTY_LABELS[material.difficulty]}</MenuItem>)}
+                    </TextField>
+                  </Stack>
+                )}
                 <Stack direction="row" spacing={0.5}>{TIME_OPTIONS.map((minutes) => <Button key={minutes} size="small" fullWidth variant={entry.minutes === minutes ? "contained" : "outlined"} onClick={() => updateEntry(entry.key, { minutes })}>{minutes}</Button>)}</Stack>
                 <Stack direction="row" spacing={1} alignItems="center">
                   <Button variant="outlined" onClick={() => updateEntry(entry.key, { minutes: Math.max(5, entry.minutes - 5) })}>−5</Button>

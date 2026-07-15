@@ -16,8 +16,10 @@ export default function ThemeRegistry({
       <CssBaseline />
       <Box
         sx={{
-          // Reserve the fixed bottom navigation and the device safe area.
-          pb: "calc(56px + env(safe-area-inset-bottom))",
+          // Mobile reserves the bottom bar; desktop reserves the permanent sidebar.
+          pb: { xs: "calc(56px + env(safe-area-inset-bottom))", md: 0 },
+          ml: { md: "224px" },
+          minHeight: "100dvh",
         }}
       >
         {children}
