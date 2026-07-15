@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('nightly', {
   getState: () => ipcRenderer.invoke('app:get-state'),
   setEngine: (engine) => ipcRenderer.invoke('config:set-engine', engine),
+  setModel: (model) => ipcRenderer.invoke('config:set-model', model),
   setSchedule: (hour, minute) => ipcRenderer.invoke('config:set-schedule', { hour, minute }),
   setEnabled: (enabled) => ipcRenderer.invoke('config:set-enabled', enabled),
   startRun: () => ipcRenderer.invoke('run:start'),

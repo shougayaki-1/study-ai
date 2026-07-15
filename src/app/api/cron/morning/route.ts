@@ -50,6 +50,7 @@ export async function GET(request: NextRequest) {
       .select("id, unit_id, material_id, range_text, reason, due_date, done")
       .eq("due_date", today)
       .eq("done", false)
+      .eq("status", "pending")
       .order("created_at", { ascending: true }),
     supabase.from("push_subscriptions").select("id, endpoint, keys_json"),
   ]);

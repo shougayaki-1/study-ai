@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Electron menubar app is an independent CommonJS project with its own tests.
+    "analysis/menubar-app/**",
   ]),
 ]);
 

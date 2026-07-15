@@ -6,6 +6,7 @@ import BottomNavigation from "@mui/material/BottomNavigation";
 import BottomNavigationAction from "@mui/material/BottomNavigationAction";
 import TodayIcon from "@mui/icons-material/Today";
 import EditNoteIcon from "@mui/icons-material/EditNote";
+import ListAltIcon from "@mui/icons-material/ListAlt";
 import InsightsIcon from "@mui/icons-material/Insights";
 import EventNoteIcon from "@mui/icons-material/EventNote";
 import SettingsIcon from "@mui/icons-material/Settings";
@@ -13,6 +14,7 @@ import SettingsIcon from "@mui/icons-material/Settings";
 const TABS = [
   { label: "今日", value: "/", icon: <TodayIcon /> },
   { label: "記録", value: "/record", icon: <EditNoteIcon /> },
+  { label: "履歴", value: "/records", icon: <ListAltIcon /> },
   { label: "分析", value: "/stats", icon: <InsightsIcon /> },
   { label: "予定", value: "/schedule", icon: <EventNoteIcon /> },
   { label: "設定", value: "/settings", icon: <SettingsIcon /> },

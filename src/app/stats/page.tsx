@@ -11,7 +11,17 @@ import Alert from "@mui/material/Alert";
 import Divider from "@mui/material/Divider";
 import Tabs from "@mui/material/Tabs";
 import Tab from "@mui/material/Tab";
+import Dialog from "@mui/material/Dialog";
+import DialogTitle from "@mui/material/DialogTitle";
+import DialogContent from "@mui/material/DialogContent";
+import Button from "@mui/material/Button";
+import MenuItem from "@mui/material/MenuItem";
+import TextField from "@mui/material/TextField";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { createClient } from "@/lib/supabase/client";
+import { LEARNING_STATE_LABELS, type LearningState, type Understanding } from "@/lib/learning";
+import { startOfWeekDate } from "@/lib/learning";
 
 export const dynamic = "force-dynamic";
 
@@ -37,6 +47,9 @@ type EssayReview = {
   overall: string | null;
   created_at: string;
 };
+type Snapshot = { unit_id: string; snapshot_date: string; state: LearningState; accuracy: number | null; weakness_score: number; understanding: Understanding | null; evidence_json: Record<string, unknown> | null };
+type QuestionResult = { id: string; photo_id: string; unit_id: string | null; question_label: string | null; is_correct: boolean | null; error_type: string | null; confidence: number | null; created_at: string };
+type ReviewPhoto = { id: string; storage_path: string; confidence: number | null; needs_review: boolean; created_at: string };
 
 function heatColor(score: number, max: number) {
   if (max <= 0) return "#f5f5f5";
@@ -58,48 +71,10 @@ function fmtWeekLabel(d: Date) {
   return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 
-// 簡易Markdownレンダラー(見出し/箇条書き/太字程度)。外部ライブラリ非依存。
 function SimpleMarkdown({ text }: { text: string }) {
-  const lines = text.split("\n");
   return (
-    <Box sx={{ fontSize: 14, lineHeight: 1.8 }}>
-      {lines.map((line, i) => {
-        const trimmed = line.trim();
-        if (trimmed.startsWith("### ")) {
-          return (
-            <Typography key={i} variant="subtitle2" sx={{ mt: 1 }}>
-              {trimmed.slice(4)}
-            </Typography>
-          );
-        }
-        if (trimmed.startsWith("## ")) {
-          return (
-            <Typography key={i} variant="subtitle1" fontWeight={700} sx={{ mt: 1 }}>
-              {trimmed.slice(3)}
-            </Typography>
-          );
-        }
-        if (trimmed.startsWith("# ")) {
-          return (
-            <Typography key={i} variant="h6" fontWeight={700} sx={{ mt: 1 }}>
-              {trimmed.slice(2)}
-            </Typography>
-          );
-        }
-        if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
-          return (
-            <Typography key={i} variant="body2" sx={{ pl: 2 }}>
-              ・{trimmed.slice(2)}
-            </Typography>
-          );
-        }
-        if (trimmed === "") return <Box key={i} sx={{ height: 6 }} />;
-        return (
-          <Typography key={i} variant="body2">
-            {trimmed}
-          </Typography>
-        );
-      })}
+    <Box sx={{ fontSize: 14, lineHeight: 1.8, "& table": { width: "100%", borderCollapse: "collapse" }, "& th, & td": { border: "1px solid #ddd", p: 0.5 }, "& p": { my: 0.5 } }}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
     </Box>
   );
 }
@@ -115,6 +90,11 @@ export default function StatsPage() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [reports, setReports] = useState<Report[]>([]);
   const [essays, setEssays] = useState<EssayReview[]>([]);
+  const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
+  const [questionResults, setQuestionResults] = useState<QuestionResult[]>([]);
+  const [reviewPhotos, setReviewPhotos] = useState<ReviewPhoto[]>([]);
+  const [selectedUnitId, setSelectedUnitId] = useState<string | null>(null);
+  const [weeklyMinutes, setWeeklyMinutes] = useState<number | null>(null);
   const [tab, setTab] = useState(0);
 
   useEffect(() => {
@@ -130,6 +110,9 @@ export default function StatsPage() {
           sessionsRes,
           reportsRes,
           essaysRes,
+          snapshotsRes,
+          questionResultsRes,
+          reviewPhotosRes,
         ] = await Promise.all([
           supabase.from("subjects").select("id, name, color, sort_order").order("sort_order"),
           supabase.from("units").select("id, subject_id, name, sort_order").order("sort_order"),
@@ -148,6 +131,9 @@ export default function StatsPage() {
             .select("id, structure_comment, logic_comment, vocab_comment, overall, created_at")
             .order("created_at", { ascending: false })
             .limit(10),
+          supabase.from("unit_state_snapshots").select("unit_id,snapshot_date,state,accuracy,weakness_score,understanding,evidence_json").order("snapshot_date", { ascending: false }).limit(500),
+          supabase.from("question_results").select("id,photo_id,unit_id,question_label,is_correct,error_type,confidence,created_at").order("created_at", { ascending: false }).limit(500),
+          supabase.from("photos").select("id,storage_path,confidence,needs_review,created_at").eq("needs_review", true).order("created_at", { ascending: false }),
         ]);
         if (!active) return;
         if (
@@ -157,6 +143,7 @@ export default function StatsPage() {
           sessionsRes.error ||
           reportsRes.error ||
           essaysRes.error
+          || snapshotsRes.error || questionResultsRes.error || reviewPhotosRes.error
         ) {
           setConfigError(
             "データを取得できませんでした。Supabaseの接続設定(.env.local)を確認してください。",
@@ -169,6 +156,9 @@ export default function StatsPage() {
         setSessions((sessionsRes.data ?? []) as Session[]);
         setReports((reportsRes.data ?? []) as Report[]);
         setEssays((essaysRes.data ?? []) as EssayReview[]);
+        setSnapshots((snapshotsRes.data ?? []) as Snapshot[]);
+        setQuestionResults((questionResultsRes.data ?? []) as QuestionResult[]);
+        setReviewPhotos((reviewPhotosRes.data ?? []) as ReviewPhoto[]);
       } catch {
         if (active) setConfigError("Supabaseに接続できません。.env.local を確認してください。");
       } finally {
@@ -192,6 +182,18 @@ export default function StatsPage() {
     () => weaknesses.reduce((m, w) => Math.max(m, w.score ?? 0), 0),
     [weaknesses],
   );
+
+  const estimatedWeeklyMinutes = useMemo(() => Math.round(sessions.reduce((sum, session) => sum + session.minutes, 0) / 8 / 5) * 5, [sessions]);
+  const weeklyReview = useMemo(() => {
+    const latest = new Map<string, Snapshot>();
+    snapshots.forEach((snapshot) => { if (!latest.has(snapshot.unit_id)) latest.set(snapshot.unit_id, snapshot); });
+    const named = [...latest.values()].map((snapshot) => ({ ...snapshot, name: units.find((unit) => unit.id === snapshot.unit_id)?.name ?? "不明" }));
+    return {
+      improved: named.filter((row) => Boolean(row.evidence_json?.improving)).slice(0, 5),
+      focus: named.filter((row) => ["foundation", "review", "learning"].includes(row.state)).sort((a, b) => b.weakness_score - a.weakness_score).slice(0, 5),
+      undiagnosed: named.filter((row) => row.state === "undiagnosed").slice(0, 5),
+    };
+  }, [snapshots, units]);
 
   const unitsBySubject = useMemo(() => {
     const map = new Map<string, Unit[]>();
@@ -252,6 +254,27 @@ export default function StatsPage() {
       )}
 
       <Stack spacing={2}>
+        <Paper variant="outlined" sx={{ p: 2 }}>
+          <Typography variant="subtitle2" color="text.secondary">来週使える学習時間</Typography>
+          <Typography variant="body2" sx={{ mb: 1 }}>直近8週間からの推定値です。週合計だけ調整できます。</Typography>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <TextField type="number" size="small" label="週合計（分）" value={weeklyMinutes ?? estimatedWeeklyMinutes} onChange={(event) => setWeeklyMinutes(Number(event.target.value))} slotProps={{ htmlInput: { step: 30, min: 0 } }} />
+            <Button variant="contained" onClick={async () => {
+              const value = weeklyMinutes ?? estimatedWeeklyMinutes;
+              const next = new Date(); next.setDate(next.getDate() + 7);
+              await supabase.from("weekly_plans").upsert({ week_start: startOfWeekDate(next), estimated_minutes: estimatedWeeklyMinutes, adjusted_minutes: value, updated_at: new Date().toISOString() }, { onConflict: "week_start" });
+            }}>保存</Button>
+          </Stack>
+        </Paper>
+        <Paper variant="outlined" sx={{ p: 2 }}>
+          <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>週次振り返り・来週の重点</Typography>
+          <Typography fontWeight={700}>伸びた単元</Typography>
+          <Typography variant="body2">{weeklyReview.improved.length ? weeklyReview.improved.map((row) => row.name).join("、") : "改善傾向の判定にはもう少し記録が必要です"}</Typography>
+          <Typography fontWeight={700} sx={{ mt: 1 }}>重点候補</Typography>
+          <Typography variant="body2">{weeklyReview.focus.length ? weeklyReview.focus.map((row) => `${row.name}（${LEARNING_STATE_LABELS[row.state]}）`).join("、") : "現在、大きな課題はありません"}</Typography>
+          <Typography fontWeight={700} sx={{ mt: 1 }}>状況確認</Typography>
+          <Typography variant="body2">{weeklyReview.undiagnosed.length ? `${weeklyReview.undiagnosed.map((row) => row.name).join("、")}を短い確認学習で診断` : "対象単元はすべて診断済みです"}</Typography>
+        </Paper>
         {/* 弱点ヒートマップ */}
         <Paper variant="outlined" sx={{ p: 2 }}>
           <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1.5 }}>
@@ -302,7 +325,9 @@ export default function StatsPage() {
                               fontSize: 11,
                               border: "1px solid #eee",
                               whiteSpace: "nowrap",
+                              cursor: "pointer",
                             }}
+                            onClick={() => setSelectedUnitId(unit.id)}
                           >
                             {unit.name}
                           </Box>
@@ -447,7 +472,67 @@ export default function StatsPage() {
               </Stack>
             ))}
         </Paper>
+        {reviewPhotos.length > 0 && (
+          <Alert severity="warning">AI判定の確認が必要な写真が{reviewPhotos.length}件あります。単元詳細から設問を修正できます。</Alert>
+        )}
       </Stack>
+      <UnitDetailDialog
+        unit={units.find((unit) => unit.id === selectedUnitId) ?? null}
+        snapshots={snapshots.filter((snapshot) => snapshot.unit_id === selectedUnitId).reverse()}
+        results={questionResults.filter((result) => result.unit_id === selectedUnitId)}
+        onClose={() => setSelectedUnitId(null)}
+        onCorrect={async (result, patch) => {
+          const { error } = await supabase.from("question_results").update({ ...patch, corrected_at: new Date().toISOString(), confidence: 1 }).eq("id", result.id);
+          if (!error) {
+            const nextRows = questionResults.map((row) => row.id === result.id ? { ...row, ...patch, confidence: 1 } : row);
+            setQuestionResults(nextRows);
+            if (!nextRows.some((row) => row.photo_id === result.photo_id && (row.confidence ?? 1) < 0.7)) {
+              await supabase.from("photos").update({ needs_review: false, confidence: 1 }).eq("id", result.photo_id);
+              setReviewPhotos((rows) => rows.filter((photo) => photo.id !== result.photo_id));
+            }
+          }
+        }}
+      />
     </Box>
+  );
+}
+
+function UnitDetailDialog({ unit, snapshots, results, onClose, onCorrect }: {
+  unit: Unit | null;
+  snapshots: Snapshot[];
+  results: QuestionResult[];
+  onClose: () => void;
+  onCorrect: (result: QuestionResult, patch: Pick<QuestionResult, "is_correct" | "error_type">) => Promise<void>;
+}) {
+  const latest = snapshots.at(-1);
+  const errorCounts = results.filter((result) => result.is_correct === false).reduce<Record<string, number>>((acc, result) => {
+    const key = result.error_type ?? "other";
+    acc[key] = (acc[key] ?? 0) + 1;
+    return acc;
+  }, {});
+  return (
+    <Dialog open={!!unit} onClose={onClose} fullWidth maxWidth="sm">
+      <DialogTitle>{unit?.name}</DialogTitle>
+      <DialogContent>
+        <Stack spacing={2}>
+          <Stack direction="row" spacing={1}>
+            <Chip label={latest ? LEARNING_STATE_LABELS[latest.state] : "未診断"} color={latest?.state === "foundation" || latest?.state === "review" ? "warning" : "default"} />
+            <Chip label={`正答率 ${latest?.accuracy == null ? "-" : `${Math.round(latest.accuracy * 100)}%`}`} />
+          </Stack>
+          <Box><Typography fontWeight={700}>状態の推移</Typography><Typography variant="body2">{snapshots.length ? snapshots.map((snapshot) => `${snapshot.snapshot_date} ${LEARNING_STATE_LABELS[snapshot.state]}${snapshot.accuracy == null ? "" : ` ${Math.round(snapshot.accuracy * 100)}%`}`).join(" → ") : "まだ履歴がありません"}</Typography></Box>
+          <Box><Typography fontWeight={700}>誤答タイプ</Typography><Typography variant="body2">{Object.keys(errorCounts).length ? Object.entries(errorCounts).map(([key, count]) => `${key}: ${count}件`).join(" / ") : "誤答データはありません"}</Typography></Box>
+          <Box><Typography fontWeight={700}>最近の設問</Typography><Stack spacing={1}>{results.slice(0, 20).map((result) => (
+            <Stack key={result.id} direction="row" spacing={1} alignItems="center">
+              <Typography variant="body2" sx={{ flex: 1 }}>{result.question_label ?? "設問"}{result.confidence != null && result.confidence < 0.7 ? "（要確認）" : ""}</Typography>
+              <Button size="small" variant={result.is_correct === true ? "contained" : "outlined"} onClick={() => onCorrect(result, { is_correct: true, error_type: null })}>○</Button>
+              <Button size="small" color="error" variant={result.is_correct === false ? "contained" : "outlined"} onClick={() => onCorrect(result, { is_correct: false, error_type: result.error_type ?? "other" })}>×</Button>
+              {result.is_correct === false && <TextField select size="small" value={result.error_type ?? "other"} onChange={(event) => onCorrect(result, { is_correct: false, error_type: event.target.value })} sx={{ width: 100 }}>
+                {["calc", "knowledge", "reading", "logic", "other"].map((type) => <MenuItem key={type} value={type}>{type}</MenuItem>)}
+              </TextField>}
+            </Stack>
+          ))}</Stack></Box>
+        </Stack>
+      </DialogContent>
+    </Dialog>
   );
 }

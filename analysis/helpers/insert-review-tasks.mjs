@@ -18,5 +18,10 @@ if (arr.length < 3 || arr.length > 5) {
 }
 
 const db = restClient();
+for (const row of arr) {
+  if (!row.reason || !row.range_text || !row.estimated_minutes || !row.source_kind) {
+    throw new Error('各review_taskには reason, range_text, estimated_minutes, source_kind が必要です');
+  }
+}
 const inserted = await db.insert('review_tasks', arr);
 printJson(inserted);

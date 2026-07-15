@@ -38,15 +38,17 @@ class PlistManager {
   }
 
   async getConfig() {
-    const [hour, minute, engine, enabled] = await Promise.all([
+    const [hour, minute, engine, model, enabled] = await Promise.all([
       this.print('StartCalendarInterval:Hour'),
       this.print('StartCalendarInterval:Minute'),
       this.print('EnvironmentVariables:STUDY_AI_AGENT_CLI'),
+      this.print('EnvironmentVariables:STUDY_AI_AGENT_MODEL'),
       this.isLoaded(),
     ]);
 
     return {
       engine: engine === 'codex' ? 'codex' : 'claude',
+      model: model || 'default',
       hour: toInteger(hour, 23),
       minute: toInteger(minute, 30),
       enabled,
@@ -67,6 +69,17 @@ class PlistManager {
       await this.command(`Set :EnvironmentVariables:STUDY_AI_AGENT_CLI ${engine}`);
     }
 
+    if (wasLoaded) await this.reload();
+    return this.getConfig();
+  }
+
+  async setModel(model) {
+    const normalized = `${model || 'default'}`.trim();
+    if (!/^[A-Za-z0-9._:-]+$/.test(normalized)) throw new Error('モデル名に使用できない文字が含まれています');
+    const wasLoaded = await this.isLoaded();
+    if ((await this.print('EnvironmentVariables')) === null) await this.command('Add :EnvironmentVariables dict');
+    if ((await this.print('EnvironmentVariables:STUDY_AI_AGENT_MODEL')) === null) await this.command(`Add :EnvironmentVariables:STUDY_AI_AGENT_MODEL string ${normalized}`);
+    else await this.command(`Set :EnvironmentVariables:STUDY_AI_AGENT_MODEL ${normalized}`);
     if (wasLoaded) await this.reload();
     return this.getConfig();
   }

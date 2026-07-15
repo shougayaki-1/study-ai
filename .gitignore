@@ -17,6 +17,11 @@
 /.next/
 /out/
 
+# Large study-record photos temporarily transferred to this Mac (for example via AirDrop)
+/record-images/
+!/record-images/
+!/record-images/.gitkeep
+
 # production
 /build
 

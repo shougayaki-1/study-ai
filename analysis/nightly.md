@@ -34,10 +34,15 @@ Node標準機能のみで完結する)。
 ## 処理フロー
 
 ### 0. 準備
-1. `node analysis/helpers/list-units.mjs` で単元マスタ(id・名称・科目名)を取得し、
+1. `node analysis/helpers/start-analysis-run.mjs` を実行して返された `id` を保持する。
+   以後、レポート保存時の第3引数と、最後の完了更新にこのIDを使う。
+2. `node analysis/helpers/list-units.mjs` で単元マスタ(id・名称・科目名)を取得し、
    以後の `unit_id` 名寄せに使う。
-2. `node analysis/helpers/list-materials.mjs` で教材マスタを取得し、
+3. `node analysis/helpers/list-materials.mjs` で教材マスタを取得し、
    復習提案の `material_id` 選定に使う。
+4. `node analysis/helpers/historical-context.mjs` を実行し、**当日だけでなく全履歴**から
+   算出した単元状態、理解度遷移、直近30問/10問の正答率、誤答傾向、過去提案の実行結果、
+   試験予定、週間学習可能時間を取得する。この結果を提案判断の主な根拠にする。
 
 ### 1. pending写真の読み取り
 
@@ -60,6 +65,8 @@ Node標準機能のみで完結する)。
        `calc`(計算ミス)/ `knowledge`(知識不足)/ `reading`(読み取りミス)/
        `logic`(論理・解法の誤り)/ `other`(上記以外・判断不能)。
        手がかりが少ない場合は `other` を選ぶ(無理に断定しない)。
+     - 設問ごとに判定確信度 `confidence` (0〜1)を付ける。0.7未満の設問がある写真は
+       `photos.needs_review=true` とし、アプリで本人が修正できるようにする。
    - `kind=exercise` の場合: 上記を設問ごとにまとめ、
      `node analysis/helpers/insert-question-results.mjs '<JSON配列>'` で
      `question_results` に挿入する。各行の形式:
@@ -109,11 +116,19 @@ score = (1 - 直近30件の正答率) × (1 + log(1 + 経過日数) / 2)
    - 弱点スコア上位の単元を中心に、**最終学習から日が空いている単元**も優先する。
    - 同じ科目に偏りすぎないよう、可能であれば2〜3科目に分散させる。
    - 件数は **3〜5件**。
+   - historical-context の全履歴を使い、直近30問と最近の理解度を強く評価する。
+     過去に苦手でも直近10問で改善していれば、その改善を明示して優先度を下げる。
+   - `undiagnosed` は弱点と呼ばず、2〜3問・15分程度の状況確認を提案する。
+   - `foundation` は、同じ単元に関連する一段階易しい教材を優先する。
+   - 前日の未完了提案は持ち越さず、最新状態から再評価する。
 3. 各タスクについて、手順0で取得した教材マスタから該当科目の教材を選び、
    **具体的な範囲**(`range_text`、例:「青チャート 例題40〜43」「Vintage 単語1〜50」)を
    決める。ちょうど良い教材が無ければ `material_id` は null にし、`range_text` は
    「教科書の該当単元を復習」等、単元名から導ける具体的な指示にする。
 4. `reason` には根拠を簡潔に記す(例:「正答率52%、5日未学習」「直近3回連続で誤答」)。
+   `estimated_minutes`、`priority_score`、`source_kind`
+   (`weakness`/`retention`/`diagnostic`) と数値根拠の `evidence_json` も必ず保存する。
+   提案時間の合計は週間学習可能時間を超えないようにする。
 5. `due_date` は翌日の日付(YYYY-MM-DD)を指定する。
 6. `node analysis/helpers/insert-review-tasks.mjs '<JSON配列>'` で `review_tasks` に挿入する。
 
@@ -129,7 +144,7 @@ score = (1 - 直近30件の正答率) × (1 + log(1 + 経過日数) / 2)
    - 判読不能だった写真の件数と再撮影のお願い(該当する場合)
    - 明日の復習提案(手順3で生成した内容)の要約
 4. 作成したMarkdownを一時ファイル(例: `analysis/tmp/daily-report.md`)に書き出し、
-   `node analysis/helpers/insert-report.mjs daily analysis/tmp/daily-report.md` で
+   `node analysis/helpers/insert-report.mjs daily analysis/tmp/daily-report.md <analysis_run_id>` で
    `reports` (`kind=daily`) に保存する。
 5. **実行日が日曜日の場合**、追加で週次総括を作成する:
    - `node analysis/helpers/daily-summary.mjs 2026-01-01T00:00:00Z` のように `since` を
@@ -140,6 +155,9 @@ score = (1 - 直近30件の正答率) × (1 + log(1 + 経過日数) / 2)
      `node analysis/helpers/insert-report.mjs weekly analysis/tmp/weekly-report.md` で保存する。
 
 ### 5. 完了報告
+
+完了内容をJSONにまとめ、`node analysis/helpers/finish-analysis-run.mjs <analysis_run_id> completed '<JSON>'`
+を実行して、使用エンジン・モデルと実行結果をDBに残す。途中失敗時は可能な限り `failed` で更新する。
 
 標準出力(実行ログ)に、以下を簡潔にまとめて出力して終了する:
 - 処理したpending写真の件数(analyzed / failed 内訳)

@@ -14,6 +14,7 @@ import DialogTitle from "@mui/material/DialogTitle";
 import DialogContent from "@mui/material/DialogContent";
 import DialogActions from "@mui/material/DialogActions";
 import TextField from "@mui/material/TextField";
+import MenuItem from "@mui/material/MenuItem";
 import ToggleButton from "@mui/material/ToggleButton";
 import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
 import CircularProgress from "@mui/material/CircularProgress";
@@ -39,6 +40,8 @@ type EventRow = {
   due_date: string;
   done: boolean;
 };
+type SubjectRow = { id: string; name: string };
+type UnitRow = { id: string; subject_id: string; name: string };
 
 function todayStr() {
   return new Date().toISOString().slice(0, 10);
@@ -49,11 +52,15 @@ export default function SchedulePage() {
   const [loading, setLoading] = useState(true);
   const [configError, setConfigError] = useState<string | null>(null);
   const [events, setEvents] = useState<EventRow[]>([]);
+  const [subjects, setSubjects] = useState<SubjectRow[]>([]);
+  const [units, setUnits] = useState<UnitRow[]>([]);
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [newKind, setNewKind] = useState<EventKind>("assignment");
   const [newTitle, setNewTitle] = useState("");
   const [newDate, setNewDate] = useState(todayStr());
+  const [newSubjectId, setNewSubjectId] = useState("");
+  const [newUnitId, setNewUnitId] = useState("");
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -88,10 +95,23 @@ export default function SchedulePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    Promise.all([
+      supabase.from("subjects").select("id,name").eq("is_target", true).order("sort_order"),
+      supabase.from("units").select("id,subject_id,name").eq("is_target", true).order("sort_order"),
+    ]).then(([subjectResult, unitResult]) => {
+      setSubjects((subjectResult.data ?? []) as SubjectRow[]);
+      setUnits((unitResult.data ?? []) as UnitRow[]);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const openDialog = () => {
     setNewKind("assignment");
     setNewTitle("");
     setNewDate(todayStr());
+    setNewSubjectId("");
+    setNewUnitId("");
     setFormError(null);
     setDialogOpen(true);
   };
@@ -104,12 +124,20 @@ export default function SchedulePage() {
     setSaving(true);
     setFormError(null);
     try {
-      const { error } = await supabase.from("events").insert({
+      const { data, error } = await supabase.from("events").insert({
         kind: newKind,
         title: newTitle.trim(),
         due_date: newDate,
-      });
+      }).select("id").single();
       if (error) throw error;
+      if (newSubjectId) {
+        const { error: subjectError } = await supabase.from("event_subjects").insert({ event_id: data.id, subject_id: newSubjectId });
+        if (subjectError) throw subjectError;
+      }
+      if (newUnitId) {
+        const { error: unitError } = await supabase.from("event_units").insert({ event_id: data.id, unit_id: newUnitId });
+        if (unitError) throw unitError;
+      }
       setDialogOpen(false);
       await loadEvents();
     } catch (e) {
@@ -350,6 +378,14 @@ export default function SchedulePage() {
               size="small"
               placeholder="例: 数学課題プリント提出"
             />
+            <TextField select label="対象科目（任意）" value={newSubjectId} onChange={(event) => { setNewSubjectId(event.target.value); setNewUnitId(""); }} fullWidth size="small">
+              <MenuItem value="">指定しない</MenuItem>
+              {subjects.map((subject) => <MenuItem key={subject.id} value={subject.id}>{subject.name}</MenuItem>)}
+            </TextField>
+            <TextField select label="対象単元（任意）" value={newUnitId} onChange={(event) => setNewUnitId(event.target.value)} disabled={!newSubjectId} fullWidth size="small">
+              <MenuItem value="">指定しない</MenuItem>
+              {units.filter((unit) => unit.subject_id === newSubjectId).map((unit) => <MenuItem key={unit.id} value={unit.id}>{unit.name}</MenuItem>)}
+            </TextField>
             <TextField
               label="締切日"
               type="date"

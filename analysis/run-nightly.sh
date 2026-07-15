@@ -11,16 +11,25 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 ENGINE="${STUDY_AI_AGENT_CLI:-claude}"
+MODEL="${STUDY_AI_AGENT_MODEL:-default}"
 PROMPT="$(cat analysis/nightly.md)"
 
 case "$ENGINE" in
   claude)
-    exec /usr/bin/caffeinate -i claude -p "$PROMPT" --allowedTools "Bash,Read"
+    if [ "$MODEL" = "default" ]; then
+      exec /usr/bin/caffeinate -i claude -p "$PROMPT" --allowedTools "Bash,Read"
+    else
+      exec /usr/bin/caffeinate -i claude -p "$PROMPT" --model "$MODEL" --allowedTools "Bash,Read"
+    fi
     ;;
   codex)
     # Codex CLIのヘッドレス実行フラグはバージョンにより異なる場合がある。
     # 乗り換え時は `codex exec --help` で最新のオプション名を確認し、必要なら調整すること。
-    exec /usr/bin/caffeinate -i codex exec "$PROMPT"
+    if [ "$MODEL" = "default" ]; then
+      exec /usr/bin/caffeinate -i codex exec "$PROMPT"
+    else
+      exec /usr/bin/caffeinate -i codex exec --model "$MODEL" "$PROMPT"
+    fi
     ;;
   *)
     echo "未知の STUDY_AI_AGENT_CLI: $ENGINE (claude または codex を指定)" >&2

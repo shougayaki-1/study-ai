@@ -122,6 +122,7 @@ function registerIpc() {
     packaged: app.isPackaged,
   }));
   ipcMain.handle('config:set-engine', async (_event, engine) => plist.setEngine(engine));
+  ipcMain.handle('config:set-model', async (_event, model) => plist.setModel(model));
   ipcMain.handle('config:set-schedule', async (_event, value) => plist.setSchedule(value?.hour, value?.minute));
   ipcMain.handle('config:set-enabled', async (_event, enabled) => plist.setEnabled(Boolean(enabled)));
   ipcMain.handle('logs:list', async () => logs.list());
@@ -147,12 +148,12 @@ async function startManualRun() {
   const output = fs.createWriteStream(logPath, { flags: 'wx' });
   const child = spawn(scriptPath, [], {
     cwd: projectRoot,
-    env: { ...process.env, STUDY_AI_AGENT_CLI: config.engine },
+    env: { ...process.env, STUDY_AI_AGENT_CLI: config.engine, STUDY_AI_AGENT_MODEL: config.model },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
   manualRun = { child, name, logPath, startedAt: new Date().toISOString(), tail: '' };
-  notify('夜間分析を開始しました', `${config.engine} で手動実行しています`);
+  notify('夜間分析を開始しました', `${config.engine} / ${config.model} で手動実行しています`);
   broadcast('run:status', currentStatus());
 
   const onData = (chunk) => {

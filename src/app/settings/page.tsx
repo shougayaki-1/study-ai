@@ -32,9 +32,10 @@ import { isPushSupported, urlBase64ToUint8Array } from "@/lib/push";
 
 export const dynamic = "force-dynamic";
 
-type Subject = { id: string; name: string; color: string; sort_order: number };
-type Unit = { id: string; subject_id: string; name: string; sort_order: number };
-type Material = { id: string; subject_id: string; name: string; kind: string };
+type Subject = { id: string; name: string; color: string; sort_order: number; is_target: boolean };
+type Unit = { id: string; subject_id: string; name: string; sort_order: number; is_target: boolean };
+type Material = { id: string; subject_id: string; name: string; kind: string; difficulty: string };
+const DIFFICULTIES = [["basic", "基礎"], ["standard", "標準"], ["advanced", "応用"]] as const;
 
 export default function SettingsPage() {
   const supabase = createClient();
@@ -45,6 +46,7 @@ export default function SettingsPage() {
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
   const [materials, setMaterials] = useState<Material[]>([]);
+  const [materialUnits, setMaterialUnits] = useState<Array<{ material_id: string; unit_id: string }>>([]);
   const [selectedSubjectId, setSelectedSubjectId] = useState<string>("");
 
   const [pushEnabled, setPushEnabled] = useState(false);
@@ -55,17 +57,19 @@ export default function SettingsPage() {
   const [dialogKind, setDialogKind] = useState<"unit" | "material" | null>(null);
   const [newName, setNewName] = useState("");
   const [newMaterialKind, setNewMaterialKind] = useState<string>(MATERIAL_KINDS[0]);
+  const [newMaterialDifficulty, setNewMaterialDifficulty] = useState("standard");
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
   const loadAll = async () => {
     try {
-      const [subjectsRes, unitsRes, materialsRes] = await Promise.all([
-        supabase.from("subjects").select("id, name, color, sort_order").order("sort_order"),
-        supabase.from("units").select("id, subject_id, name, sort_order").order("sort_order"),
-        supabase.from("materials").select("id, subject_id, name, kind").order("name"),
+      const [subjectsRes, unitsRes, materialsRes, materialUnitsRes] = await Promise.all([
+        supabase.from("subjects").select("id, name, color, sort_order, is_target").order("sort_order"),
+        supabase.from("units").select("id, subject_id, name, sort_order, is_target").order("sort_order"),
+        supabase.from("materials").select("id, subject_id, name, kind, difficulty").order("name"),
+        supabase.from("material_units").select("material_id,unit_id"),
       ]);
-      if (subjectsRes.error || unitsRes.error || materialsRes.error) {
+      if (subjectsRes.error || unitsRes.error || materialsRes.error || materialUnitsRes.error) {
         setConfigError(
           "データを取得できませんでした。Supabaseの接続設定(.env.local)を確認してください。",
         );
@@ -75,6 +79,7 @@ export default function SettingsPage() {
       setSubjects(subjectData);
       setUnits((unitsRes.data ?? []) as Unit[]);
       setMaterials((materialsRes.data ?? []) as Material[]);
+      setMaterialUnits((materialUnitsRes.data ?? []) as Array<{ material_id: string; unit_id: string }>);
       if (!selectedSubjectId && subjectData.length > 0) {
         setSelectedSubjectId(subjectData[0].id);
       }
@@ -165,6 +170,7 @@ export default function SettingsPage() {
     setDialogKind(kind);
     setNewName("");
     setNewMaterialKind(MATERIAL_KINDS[0]);
+    setNewMaterialDifficulty("standard");
     setFormError(null);
   };
 
@@ -189,6 +195,7 @@ export default function SettingsPage() {
           subject_id: selectedSubjectId,
           name: newName.trim(),
           kind: newMaterialKind,
+          difficulty: newMaterialDifficulty,
         });
         if (error) throw error;
       }
@@ -216,6 +223,29 @@ export default function SettingsPage() {
       await supabase.from("materials").update({ name }).eq("id", material.id);
     } catch {
       await loadAll();
+    }
+  };
+
+  const setTarget = async (table: "subjects" | "units", id: string, value: boolean) => {
+    if (table === "subjects") setSubjects((rows) => rows.map((row) => row.id === id ? { ...row, is_target: value } : row));
+    else setUnits((rows) => rows.map((row) => row.id === id ? { ...row, is_target: value } : row));
+    const { error } = await supabase.from(table).update({ is_target: value }).eq("id", id);
+    if (error) await loadAll();
+  };
+
+  const setDifficulty = async (material: Material, difficulty: string) => {
+    setMaterials((rows) => rows.map((row) => row.id === material.id ? { ...row, difficulty } : row));
+    const { error } = await supabase.from("materials").update({ difficulty }).eq("id", material.id);
+    if (error) await loadAll();
+  };
+
+  const setMaterialUnitIds = async (materialId: string, unitIds: string[]) => {
+    const previousRows = materialUnits.filter((row) => row.material_id === materialId);
+    setMaterialUnits((rows) => [...rows.filter((row) => row.material_id !== materialId), ...unitIds.map((unit_id) => ({ material_id: materialId, unit_id }))]);
+    const { error: deleteError } = await supabase.from("material_units").delete().eq("material_id", materialId);
+    const { error: insertError } = unitIds.length ? await supabase.from("material_units").insert(unitIds.map((unit_id) => ({ material_id: materialId, unit_id }))) : { error: null };
+    if (deleteError || insertError) {
+      setMaterialUnits((rows) => [...rows.filter((row) => row.material_id !== materialId), ...previousRows]);
     }
   };
 
@@ -300,6 +330,15 @@ export default function SettingsPage() {
               ))}
             </Select>
           </FormControl>
+          {subjects.find((subject) => subject.id === selectedSubjectId) && (
+            <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
+              <Typography variant="body2">この科目を受験・学習対象にする</Typography>
+              <Switch
+                checked={subjects.find((subject) => subject.id === selectedSubjectId)?.is_target ?? false}
+                onChange={(event) => setTarget("subjects", selectedSubjectId, event.target.checked)}
+              />
+            </Stack>
+          )}
 
           <Tabs
             value={tab}
@@ -315,6 +354,7 @@ export default function SettingsPage() {
             <Stack spacing={1}>
               {unitsForSubject.map((u, idx) => (
                 <Stack key={u.id} direction="row" alignItems="center" spacing={0.5}>
+                  <Switch size="small" checked={u.is_target} onChange={(event) => setTarget("units", u.id, event.target.checked)} />
                   <TextField
                     size="small"
                     value={u.name}
@@ -353,18 +393,34 @@ export default function SettingsPage() {
           {tab === 1 && (
             <Stack spacing={1}>
               {materialsForSubject.map((m) => (
-                <Stack key={m.id} direction="row" alignItems="center" spacing={0.5}>
+                <Paper key={m.id} variant="outlined" sx={{ p: 1 }}><Stack direction="row" alignItems="center" spacing={0.5}>
                   <TextField
                     size="small"
                     value={m.name}
                     onChange={(e) => renameMaterial(m, e.target.value)}
                     sx={{ flex: 1 }}
                   />
+                  <TextField select size="small" value={m.difficulty} onChange={(event) => setDifficulty(m, event.target.value)} sx={{ width: 82 }}>
+                    {DIFFICULTIES.map(([value, label]) => <MenuItem key={value} value={value}>{label}</MenuItem>)}
+                  </TextField>
                   <Chip size="small" label={m.kind} />
                   <IconButton size="small" onClick={() => deleteMaterial(m.id)}>
                     <DeleteIcon fontSize="small" />
                   </IconButton>
                 </Stack>
+                <FormControl fullWidth size="small" sx={{ mt: 1 }}>
+                  <InputLabel id={`material-units-${m.id}`}>対応単元</InputLabel>
+                  <Select
+                    labelId={`material-units-${m.id}`}
+                    multiple
+                    label="対応単元"
+                    value={materialUnits.filter((row) => row.material_id === m.id).map((row) => row.unit_id)}
+                    onChange={(event) => setMaterialUnitIds(m.id, typeof event.target.value === "string" ? event.target.value.split(",") : event.target.value)}
+                    renderValue={(ids) => ids.map((id) => unitsForSubject.find((unit) => unit.id === id)?.name).filter(Boolean).join("、") || "未設定"}
+                  >
+                    {unitsForSubject.map((unit) => <MenuItem key={unit.id} value={unit.id}>{unit.name}</MenuItem>)}
+                  </Select>
+                </FormControl></Paper>
               ))}
               <Button
                 startIcon={<AddIcon />}
@@ -382,7 +438,7 @@ export default function SettingsPage() {
             <Box>
               <Typography variant="subtitle2">通知(Push)</Typography>
               <Typography variant="caption" color="text.secondary">
-                締切リマインドと復習提案を毎朝通知
+                毎朝の復習提案と20:30／21:30の記録リマインド
               </Typography>
             </Box>
             <Switch
@@ -416,7 +472,7 @@ export default function SettingsPage() {
               size="small"
             />
             {dialogKind === "material" && (
-              <FormControl fullWidth size="small">
+              <><FormControl fullWidth size="small">
                 <InputLabel id="material-kind-label">種別</InputLabel>
                 <Select
                   labelId="material-kind-label"
@@ -431,6 +487,12 @@ export default function SettingsPage() {
                   ))}
                 </Select>
               </FormControl>
+              <FormControl fullWidth size="small">
+                <InputLabel id="material-difficulty-label">難易度</InputLabel>
+                <Select labelId="material-difficulty-label" label="難易度" value={newMaterialDifficulty} onChange={(e) => setNewMaterialDifficulty(e.target.value)}>
+                  {DIFFICULTIES.map(([value, label]) => <MenuItem key={value} value={value}>{label}</MenuItem>)}
+                </Select>
+              </FormControl></>
             )}
             {formError && <Alert severity="error">{formError}</Alert>}
           </Stack>

@@ -15,6 +15,8 @@ const patch = {
 };
 if (resultJsonArg) {
   patch.result_json = JSON.parse(resultJsonArg);
+  if (typeof patch.result_json.confidence === 'number') patch.confidence = patch.result_json.confidence;
+  if (typeof patch.result_json.needs_review === 'boolean') patch.needs_review = patch.result_json.needs_review;
 }
 
 const db = restClient();

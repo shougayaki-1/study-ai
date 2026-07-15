@@ -17,6 +17,7 @@ create table if not exists subjects (
   name text not null,
   color text not null default '#3f51b5', -- MUIパレットに合う hex カラー
   sort_order integer not null default 0,
+  is_target boolean not null default true,
   created_at timestamptz not null default now()
 );
 
@@ -26,6 +27,7 @@ create table if not exists units (
   subject_id uuid not null references subjects(id) on delete cascade,
   name text not null,
   sort_order integer not null default 0,
+  is_target boolean not null default true,
   created_at timestamptz not null default now()
 );
 
@@ -35,6 +37,7 @@ create table if not exists materials (
   subject_id uuid not null references subjects(id) on delete cascade,
   name text not null,
   kind text not null check (kind in ('問題集', '参考書', '過去問')),
+  difficulty text not null default 'standard' check (difficulty in ('basic', 'standard', 'advanced')),
   created_at timestamptz not null default now()
 );
 
@@ -45,9 +48,47 @@ create table if not exists study_sessions (
   unit_id uuid references units(id) on delete set null,
   material_id uuid references materials(id) on delete set null,
   minutes integer not null check (minutes > 0),
+  study_date date not null default current_date,
+  record_type text not null default 'material' check (record_type in ('common_test', 'secondary', 'material')),
+  understanding text check (understanding in ('understood', 'uncertain', 'not_understood')),
+  batch_id uuid,
   started_at timestamptz not null default now(),
   memo text,
   created_at timestamptz not null default now()
+);
+
+-- 既存のDBにも後方互換で記録日・演習区分を追加する。
+alter table study_sessions
+  add column if not exists study_date date not null default current_date;
+alter table study_sessions
+  add column if not exists record_type text not null default 'material';
+alter table study_sessions
+  add column if not exists understanding text;
+alter table study_sessions
+  add column if not exists batch_id uuid;
+alter table study_sessions
+  drop constraint if exists study_sessions_record_type_check;
+alter table study_sessions
+  add constraint study_sessions_record_type_check
+  check (record_type in ('common_test', 'secondary', 'material'));
+alter table study_sessions
+  drop constraint if exists study_sessions_understanding_check;
+alter table study_sessions
+  add constraint study_sessions_understanding_check
+  check (understanding is null or understanding in ('understood', 'uncertain', 'not_understood'));
+
+alter table subjects add column if not exists is_target boolean not null default true;
+alter table units add column if not exists is_target boolean not null default true;
+alter table materials add column if not exists difficulty text not null default 'standard';
+alter table materials drop constraint if exists materials_difficulty_check;
+alter table materials add constraint materials_difficulty_check
+  check (difficulty in ('basic', 'standard', 'advanced'));
+
+-- 教材が対応する単元。1教材を複数単元に関連付けられる。
+create table if not exists material_units (
+  material_id uuid not null references materials(id) on delete cascade,
+  unit_id uuid not null references units(id) on delete cascade,
+  primary key (material_id, unit_id)
 );
 
 -- 演習写真・小論文答案
@@ -70,6 +111,8 @@ create table if not exists question_results (
   question_label text,
   is_correct boolean,
   error_type text check (error_type in ('calc', 'knowledge', 'reading', 'logic', 'other')),
+  confidence numeric check (confidence is null or (confidence >= 0 and confidence <= 1)),
+  corrected_at timestamptz,
   created_at timestamptz not null default now()
 );
 
@@ -103,6 +146,12 @@ create table if not exists review_tasks (
   reason text,
   due_date date not null default (current_date),
   done boolean not null default false,
+  status text not null default 'pending' check (status in ('pending', 'completed', 'expired')),
+  completed_at timestamptz,
+  priority_score numeric,
+  source_kind text check (source_kind in ('weakness', 'retention', 'diagnostic')),
+  estimated_minutes integer check (estimated_minutes is null or estimated_minutes > 0),
+  evidence_json jsonb,
   created_at timestamptz not null default now()
 );
 
@@ -124,6 +173,72 @@ create table if not exists reports (
   created_at timestamptz not null default now()
 );
 
+-- 単元状態の推移。夜間バッチが毎日追記する。
+create table if not exists unit_state_snapshots (
+  id uuid primary key default gen_random_uuid(),
+  unit_id uuid not null references units(id) on delete cascade,
+  snapshot_date date not null default current_date,
+  state text not null check (state in ('undiagnosed', 'learning', 'review', 'mastered', 'foundation')),
+  weakness_score numeric not null default 0,
+  accuracy numeric,
+  understanding text,
+  last_studied_at timestamptz,
+  evidence_json jsonb,
+  created_at timestamptz not null default now(),
+  unique(unit_id, snapshot_date)
+);
+
+create table if not exists weekly_plans (
+  id uuid primary key default gen_random_uuid(),
+  week_start date not null unique,
+  estimated_minutes integer not null check (estimated_minutes >= 0),
+  adjusted_minutes integer check (adjusted_minutes is null or adjusted_minutes >= 0),
+  focus_json jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists analysis_runs (
+  id uuid primary key default gen_random_uuid(),
+  engine text not null,
+  model text not null,
+  status text not null default 'running' check (status in ('running', 'completed', 'failed')),
+  summary_json jsonb,
+  started_at timestamptz not null default now(),
+  completed_at timestamptz
+);
+
+alter table reports add column if not exists analysis_run_id uuid references analysis_runs(id) on delete set null;
+alter table photos add column if not exists confidence numeric check (confidence is null or (confidence >= 0 and confidence <= 1));
+alter table photos add column if not exists needs_review boolean not null default false;
+alter table question_results add column if not exists confidence numeric;
+alter table question_results add column if not exists corrected_at timestamptz;
+alter table review_tasks add column if not exists status text not null default 'pending';
+alter table review_tasks add column if not exists completed_at timestamptz;
+alter table review_tasks add column if not exists priority_score numeric;
+alter table review_tasks add column if not exists source_kind text;
+alter table review_tasks add column if not exists estimated_minutes integer;
+alter table review_tasks add column if not exists evidence_json jsonb;
+update review_tasks set status = case when done then 'completed' else status end;
+alter table review_tasks drop constraint if exists review_tasks_status_check;
+alter table review_tasks add constraint review_tasks_status_check check (status in ('pending', 'completed', 'expired'));
+alter table review_tasks drop constraint if exists review_tasks_source_kind_check;
+alter table review_tasks add constraint review_tasks_source_kind_check check (source_kind is null or source_kind in ('weakness', 'retention', 'diagnostic'));
+alter table question_results drop constraint if exists question_results_confidence_check;
+alter table question_results add constraint question_results_confidence_check check (confidence is null or (confidence >= 0 and confidence <= 1));
+
+-- 試験予定の対象範囲。
+create table if not exists event_subjects (
+  event_id uuid not null references events(id) on delete cascade,
+  subject_id uuid not null references subjects(id) on delete cascade,
+  primary key (event_id, subject_id)
+);
+create table if not exists event_units (
+  event_id uuid not null references events(id) on delete cascade,
+  unit_id uuid not null references units(id) on delete cascade,
+  primary key (event_id, unit_id)
+);
+
 -- Web Push購読
 create table if not exists push_subscriptions (
   id uuid primary key default gen_random_uuid(),
@@ -140,6 +255,8 @@ create index if not exists idx_materials_subject_id on materials(subject_id);
 create index if not exists idx_study_sessions_subject_id on study_sessions(subject_id);
 create index if not exists idx_study_sessions_unit_id on study_sessions(unit_id);
 create index if not exists idx_study_sessions_started_at on study_sessions(started_at desc);
+create index if not exists idx_study_sessions_study_date on study_sessions(study_date desc);
+create index if not exists idx_study_sessions_batch_id on study_sessions(batch_id);
 create index if not exists idx_photos_session_id on photos(session_id);
 create index if not exists idx_photos_status on photos(status);
 create index if not exists idx_question_results_photo_id on question_results(photo_id);
@@ -148,6 +265,8 @@ create index if not exists idx_essay_reviews_photo_id on essay_reviews(photo_id)
 create index if not exists idx_weakness_scores_unit_id on weakness_scores(unit_id);
 create index if not exists idx_review_tasks_due_date on review_tasks(due_date);
 create index if not exists idx_events_due_date on events(due_date);
+create index if not exists idx_unit_state_snapshots_date on unit_state_snapshots(snapshot_date desc);
+create index if not exists idx_review_tasks_status_due on review_tasks(status, due_date);
 
 -- ============================================================
 -- RLS: 認証済みユーザー(本人)のみ読み書き可
@@ -165,6 +284,12 @@ alter table review_tasks enable row level security;
 alter table events enable row level security;
 alter table reports enable row level security;
 alter table push_subscriptions enable row level security;
+alter table material_units enable row level security;
+alter table unit_state_snapshots enable row level security;
+alter table weekly_plans enable row level security;
+alter table analysis_runs enable row level security;
+alter table event_subjects enable row level security;
+alter table event_units enable row level security;
 
 do $$
 declare
@@ -174,7 +299,9 @@ begin
     select unnest(array[
       'subjects', 'units', 'materials', 'study_sessions', 'photos',
       'question_results', 'essay_reviews', 'weakness_scores',
-      'review_tasks', 'events', 'reports', 'push_subscriptions'
+      'review_tasks', 'events', 'reports', 'push_subscriptions',
+      'material_units', 'unit_state_snapshots', 'weekly_plans', 'analysis_runs',
+      'event_subjects', 'event_units'
     ])
   loop
     execute format(

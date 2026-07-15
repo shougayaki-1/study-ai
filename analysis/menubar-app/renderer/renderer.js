@@ -1,6 +1,6 @@
 const elements = {
   statusBadge: document.querySelector('#statusBadge'), elapsed: document.querySelector('#elapsed'),
-  engine: document.querySelector('#engine'), runButton: document.querySelector('#runButton'),
+  engine: document.querySelector('#engine'), model: document.querySelector('#model'), runButton: document.querySelector('#runButton'),
   liveOutput: document.querySelector('#liveOutput'), scheduleEnabled: document.querySelector('#scheduleEnabled'),
   scheduleTime: document.querySelector('#scheduleTime'), history: document.querySelector('#history'),
   refreshLogs: document.querySelector('#refreshLogs'), message: document.querySelector('#message'),
@@ -17,6 +17,7 @@ initialize().catch(showError);
 async function initialize() {
   const state = await window.nightly.getState();
   elements.engine.value = state.config.engine;
+  elements.model.value = state.config.model;
   elements.scheduleEnabled.checked = state.config.enabled;
   elements.scheduleTime.value = `${pad(state.config.hour)}:${pad(state.config.minute)}`;
   updateStatus(state.status);
@@ -34,6 +35,11 @@ async function initialize() {
 elements.engine.addEventListener('change', () => withBusy(async () => {
   await window.nightly.setEngine(elements.engine.value);
   showMessage('エンジンを更新しました');
+}));
+
+elements.model.addEventListener('change', () => withBusy(async () => {
+  await window.nightly.setModel(elements.model.value || 'default');
+  showMessage('モデルを更新しました');
 }));
 
 elements.runButton.addEventListener('click', () => withBusy(async () => {

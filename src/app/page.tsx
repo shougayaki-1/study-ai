@@ -24,6 +24,7 @@ type ReviewTask = {
   reason: string | null;
   due_date: string;
   done: boolean;
+  status?: "pending" | "completed" | "expired";
   units?: { name: string } | null;
   materials?: { name: string } | null;
 };
@@ -68,9 +69,10 @@ export default function HomePage() {
           supabase
             .from("review_tasks")
             .select(
-              "id, unit_id, material_id, range_text, reason, due_date, done, units(name), materials(name)",
+              "id, unit_id, material_id, range_text, reason, due_date, done, status, units(name), materials(name)",
             )
             .lte("due_date", today)
+            .eq("status", "pending")
             .order("due_date", { ascending: true }),
           supabase
             .from("reports")
@@ -112,7 +114,7 @@ export default function HomePage() {
     try {
       await supabase
         .from("review_tasks")
-        .update({ done: !task.done })
+        .update({ done: !task.done, status: !task.done ? "completed" : "pending", completed_at: !task.done ? new Date().toISOString() : null })
         .eq("id", task.id);
     } catch {
       // 楽観更新のロールバックは省略(次回読み込みで整合)

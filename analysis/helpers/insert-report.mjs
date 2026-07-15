@@ -5,7 +5,7 @@
 import { restClient, printJson } from './lib.mjs';
 import { readFileSync } from 'node:fs';
 
-const [, , kind, bodyPathOrDash] = process.argv;
+const [, , kind, bodyPathOrDash, analysisRunId] = process.argv;
 if (!['daily', 'weekly'].includes(kind) || !bodyPathOrDash) {
   console.error('使い方: node helpers/insert-report.mjs <daily|weekly> <mdファイルパス|->');
   process.exit(1);
@@ -13,5 +13,5 @@ if (!['daily', 'weekly'].includes(kind) || !bodyPathOrDash) {
 const body_md = bodyPathOrDash === '-' ? readFileSync(0, 'utf8') : readFileSync(bodyPathOrDash, 'utf8');
 
 const db = restClient();
-const inserted = await db.insert('reports', [{ kind, body_md }]);
+const inserted = await db.insert('reports', [{ kind, body_md, analysis_run_id: analysisRunId || null }]);
 printJson(inserted);
