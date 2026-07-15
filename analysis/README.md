@@ -6,6 +6,9 @@ study-ai の「Mac上のClaude Codeが毎晩ヘッドレス実行(`claude -p`)�
 ## 構成
 
 - `nightly.md` — Claude Codeに渡す夜間分析プロンプト本体
+- `run-nightly.sh` — 夜間バッチのエントリポイント。`STUDY_AI_AGENT_CLI` 環境変数で
+  使用するヘッドレスCLIを切り替えられる(デフォルト `claude`。将来Codexに乗り換える場合は
+  `STUDY_AI_AGENT_CLI=codex` を指定すればよく、launchdのplistは書き換え不要)
 - `helpers/` — プロンプトから呼び出すNode製ヘルパースクリプト(Supabase REST APIを
   Node標準の `fetch` で叩く。追加npmパッケージ不要)
 - `.env.example` — 環境変数のテンプレート
@@ -74,6 +77,8 @@ claude -p "$(cat analysis/nightly.md)" --allowedTools "Bash,Read"
 macOSでは `cron` より `launchd` が推奨される。以下は毎晩23:30に実行する例。
 
 1. plistファイルを作成する: `~/Library/LaunchAgents/com.studyai.nightly.plist`
+   (実際に使用するCLIコマンドは `run-nightly.sh` に切り出してあるので、plist自体は
+   CLIを問わず共通。乗り換え時はplistを触らず環境変数だけ変えればよい)
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -89,7 +94,7 @@ macOSでは `cron` より `launchd` が推奨される。以下は毎晩23:30に
     <string>/bin/zsh</string>
     <string>-l</string>
     <string>-c</string>
-    <string>cd /Users/shoug/Documents/GitHub/study-ai &amp;&amp; /usr/bin/caffeinate -i claude -p "$(cat analysis/nightly.md)" --allowedTools "Bash,Read" >> analysis/tmp/nightly-$(date +%Y%m%d).log 2>&amp;1</string>
+    <string>/Users/shoug/Documents/GitHub/study-ai/analysis/run-nightly.sh >> /Users/shoug/Documents/GitHub/study-ai/analysis/tmp/nightly-$(date +%Y%m%d).log 2>&amp;1</string>
   </array>
 
   <key>StartCalendarInterval</key>
@@ -112,8 +117,19 @@ macOSでは `cron` より `launchd` が推奨される。以下は毎晩23:30に
 ```
 
 `/Users/shoug/...` の部分は実際のユーザー名・パスに合わせて書き換える。
-`claude` コマンドがフルパスで解決できない場合は `which claude` の結果
-(例: `/opt/homebrew/bin/claude`)に置き換える。
+`/bin/zsh -l -c` (ログインシェル)経由で呼ぶことで、fnm等が管理する `claude` コマンドの
+PATHが `.zshrc` 経由で正しく解決される(fnmのシムパスは再起動で変わりうるため、
+plistに直接フルパスを埋め込まないこと)。
+
+**Codexへの乗り換え方**: `~/Library/LaunchAgents/com.studyai.nightly.plist` の
+`ProgramArguments` に環境変数を1行追加するだけでよい。
+
+```xml
+    <string>export STUDY_AI_AGENT_CLI=codex; /Users/shoug/Documents/GitHub/study-ai/analysis/run-nightly.sh >> ...</string>
+```
+
+`run-nightly.sh` 側の `codex exec` 呼び出しは暫定実装なので、乗り換え前に
+`codex exec --help` で最新のヘッドレス実行オプションを確認し、必要なら調整すること。
 
 2. 読み込み・確認:
 
