@@ -1,36 +1,36 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# study-ai
 
-## Getting Started
+受験生向け学習管理Webアプリ。設計仕様は [`docs/DESIGN.md`](./docs/DESIGN.md) を参照。
 
-First, run the development server:
+## セットアップ(フェーズ1)
 
 ```bash
+npm install
+cp .env.local.example .env.local
+# .env.local に Supabase プロジェクトの URL / anon key を設定
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Supabase側のセットアップ:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+1. Supabaseプロジェクトを作成
+2. SQL Editor で `supabase/schema.sql` → `supabase/seed.sql` の順に実行
+3. Authでユーザーを1件作成(サインアップ画面は無し。本人専用)
+4. Storageに `photos` バケットが `schema.sql` 実行時に自動作成される(private)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+`.env.local` が未設定でも `npm run build` は通るようにしてあるが、実際のログイン・データ取得にはSupabaseの接続情報が必須。
 
-## Learn More
+## 現在の実装状況(フェーズ1: 基盤)
 
-To learn more about Next.js, take a look at the following resources:
+- Next.js 15 (App Router / TypeScript) + MUI(ライトテーマ固定・ミニマル)
+- 下部固定タブ5つ: 今日(`/`) / 記録(`/record`) / 分析(`/stats`) / 予定(`/schedule`) / 設定(`/settings`)
+- `/record` のみ完全実装(科目→単元→教材→時間 or タイマーで2〜3タップ保存、写真複数枚アップロード)
+- Supabase Auth(メールログイン、`/login`)+ middleware による未認証リダイレクト
+- `supabase/schema.sql` / `supabase/seed.sql`(科目13 + 単元マスタ)
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## 次フェーズへの申し送り
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- `/`, `/stats`, `/schedule`, `/settings` は仮置き。実データ表示・CRUD UIが未実装
+- PWA(manifest.jsonは仮/アイコン未設定)+ Web Push + Vercel Cronは未着手
+- `analysis/`(夜間バッチのClaude Codeプロンプト・実行スクリプト)は未着手
+- Supabase実環境が未接続(ダミーURL/キーでフォールバックしてビルドのみ通す実装)。実運用前に `.env.local` の設定と動作確認が必要

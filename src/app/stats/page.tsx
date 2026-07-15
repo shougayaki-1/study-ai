@@ -1,54 +1,39 @@
 import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
-import Stack from "@mui/material/Stack";
 import Paper from "@mui/material/Paper";
-import Button from "@mui/material/Button";
-import Link from "next/link";
+import Stack from "@mui/material/Stack";
 
-export default function HomePage() {
+export default function StatsPage() {
   return (
     <Box sx={{ p: 2, maxWidth: 560, mx: "auto" }}>
       <Typography variant="h6" fontWeight={700} sx={{ mb: 2 }}>
-        今日
+        分析
       </Typography>
-
       <Stack spacing={2}>
         <Paper variant="outlined" sx={{ p: 2 }}>
-          <Typography variant="body2" color="text.secondary">
-            共通テストまで
-          </Typography>
-          <Typography variant="h4" fontWeight={700}>
-            ---日
-          </Typography>
-        </Paper>
-
-        <Paper variant="outlined" sx={{ p: 2 }}>
           <Typography variant="subtitle2" color="text.secondary">
-            直近の締切
+            弱点ヒートマップ(科目×単元)
           </Typography>
           <Typography variant="body2" sx={{ mt: 1 }}>
-            まだデータがありません(フェーズ2で実装)
+            weakness_scores のデータが揃うと表示されます(フェーズ2)
           </Typography>
         </Paper>
-
         <Paper variant="outlined" sx={{ p: 2 }}>
           <Typography variant="subtitle2" color="text.secondary">
-            今日の復習提案
+            勉強時間の推移
           </Typography>
           <Typography variant="body2" sx={{ mt: 1 }}>
-            まだデータがありません(夜間バッチ実装後に表示されます)
+            週/科目別の棒グラフ(フェーズ2)
           </Typography>
         </Paper>
-
-        <Button
-          component={Link}
-          href="/record"
-          variant="contained"
-          size="large"
-          fullWidth
-        >
-          記録を始める
-        </Button>
+        <Paper variant="outlined" sx={{ p: 2 }}>
+          <Typography variant="subtitle2" color="text.secondary">
+            最新レポート・小論文講評
+          </Typography>
+          <Typography variant="body2" sx={{ mt: 1 }}>
+            reports / essay_reviews の一覧(フェーズ2)
+          </Typography>
+        </Paper>
       </Stack>
     </Box>
   );

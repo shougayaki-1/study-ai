@@ -1,0 +1,10 @@
+{
+  "name": "Study AI",
+  "short_name": "StudyAI",
+  "description": "受験生向け学習管理アプリ",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
+  "icons": []
+}
