@@ -30,15 +30,9 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
-  const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY;
-
-  if (!vapidPublicKey || !vapidPrivateKey) {
-    return NextResponse.json({ error: "VAPID keys not configured" }, { status: 500 });
-  }
-
-  webpush.setVapidDetails("mailto:example@example.com", vapidPublicKey, vapidPrivateKey);
-
+  // Supabase無料プランは「1週間APIアクティビティが無いと一時停止」される。
+  // VAPID未設定時に早期returnするとDBに触れずスリープ対策が効かなくなるため、
+  // クエリ発行(=activity)はVAPIDキーの有無に関わらず必ず行う。
   const supabase = createAdminClient();
   const today = todayStr();
   const upcoming = addDays(today, 7);
@@ -73,6 +67,19 @@ export async function GET(request: NextRequest) {
   const events = eventsRes.data ?? [];
   const reviewTasks = reviewTasksRes.data ?? [];
   const subscriptions = (subsRes.data ?? []) as PushSubscriptionRow[];
+
+  const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+  const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY;
+
+  if (!vapidPublicKey || !vapidPrivateKey) {
+    return NextResponse.json({
+      warning: "VAPID keys not configured, skipped push send (Supabase keep-alive query still executed)",
+      events: events.length,
+      reviewTasks: reviewTasks.length,
+    });
+  }
+
+  webpush.setVapidDetails("mailto:example@example.com", vapidPublicKey, vapidPrivateKey);
 
   if (subscriptions.length === 0) {
     return NextResponse.json({ sent: 0, events: events.length, reviewTasks: reviewTasks.length });
