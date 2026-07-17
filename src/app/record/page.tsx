@@ -92,7 +92,7 @@ export default function RecordPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [summary, setSummary] = useState<SavedSummary | null>(null);
-  const [photoKind, setPhotoKind] = useState<"exercise" | "essay">("exercise");
+  const [photoKind, setPhotoKind] = useState<"exercise" | "essay" | "pdf_mock_exam" | "pdf_quiz">("exercise");
   const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
@@ -244,14 +244,23 @@ export default function RecordPage() {
             <Typography variant="body2">{summary.nextStep}</Typography>
           </Paper>
           <Paper variant="outlined" sx={{ p: 2 }}>
-            <Typography fontWeight={700} sx={{ mb: 1 }}>丸付け済み写真・小論文を追加</Typography>
-            <ToggleButtonGroup exclusive value={photoKind} onChange={(_, value) => value && setPhotoKind(value)} size="small" sx={{ mb: 1 }}>
-              <ToggleButton value="exercise">演習</ToggleButton>
-              <ToggleButton value="essay">小論文</ToggleButton>
+            <Typography fontWeight={700} sx={{ mb: 1 }}>丸付け済み写真・小論文・PDFを追加</Typography>
+            <ToggleButtonGroup exclusive value={photoKind} onChange={(_, value) => value && setPhotoKind(value)} size="small" sx={{ mb: 1, flexWrap: "wrap" }}>
+              <ToggleButton value="exercise">演習写真</ToggleButton>
+              <ToggleButton value="essay">小論文写真</ToggleButton>
+              <ToggleButton value="pdf_mock_exam">模試PDF</ToggleButton>
+              <ToggleButton value="pdf_quiz">演習解説PDF</ToggleButton>
             </ToggleButtonGroup>
-            <input ref={fileInputRef} hidden multiple accept="image/*" type="file" onChange={(event) => uploadPhotos(event.target.files)} />
+            <input
+              ref={fileInputRef}
+              hidden
+              multiple
+              accept={photoKind.startsWith("pdf") ? "application/pdf" : "image/*"}
+              type="file"
+              onChange={(event) => uploadPhotos(event.target.files)}
+            />
             <Button fullWidth variant="outlined" startIcon={<PhotoCameraIcon />} disabled={uploading} onClick={() => fileInputRef.current?.click()}>
-              {uploading ? "アップロード中..." : "写真を選ぶ"}
+              {uploading ? "アップロード中..." : photoKind.startsWith("pdf") ? "PDFを選ぶ" : "写真を選ぶ"}
             </Button>
           </Paper>
           {error && <Alert severity="error">{error}</Alert>}
