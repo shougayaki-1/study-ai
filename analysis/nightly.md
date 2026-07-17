@@ -106,6 +106,50 @@ Node標準機能のみで完結する)。
      (答案が読み取れない場合は exercise と同様に `failed` にする)。
 4. 全pending写真を処理し終えるまで1〜3を繰り返す。写真が0件ならこのステップはスキップしてよい。
 
+### 1b. pending PDFの読み取り(模試結果・演習解説)
+
+手順1と同じ`node analysis/helpers/list-pending-photos.mjs`の結果に、
+`kind=pdf_mock_exam`・`kind=pdf_quiz`の行も含まれている(このヘルパーはkindで
+絞り込んでいないため、写真とPDFが混在した一覧がそのまま返る)。
+
+1. 各PDFについて `node analysis/helpers/download-photo.mjs <storage_path>` で
+   `analysis/tmp/` にダウンロードし、PDFを読めるツール(Claude Codeの`Read`ツール、
+   Codex CLIの組み込みPDF読み取り)でファイルを読む。
+2. **`kind=pdf_mock_exam`の場合**(東進「Web成績表」等の模試結果PDF):
+   - PDF内の「科目型成績」または「科目別成績」の表(科目・配点・得点・得点率・偏差値・
+     平均点・順位/受験者数)を読み取る。科目名は手順0で取得した科目マスタと突き合わせ、
+     一致する`subject_id`を選ぶ(完全一致しない場合も最も近い科目を選び、nullにしない)。
+   - 「現在の偏差値による志望判定」の表があれば、`judgments_json`として
+     `[{"rank":1,"school":"...","deviation":62.7,"judgment":"A"}, ...]`の形でまとめる。
+     無ければ`null`のままでよい。
+   - `node analysis/helpers/insert-mock-exam.mjs '<模試サマリJSON>' '<科目別得点JSON配列>'`
+     で`mock_exams`・`mock_exam_scores`に挿入し、返り値の`exam.id`を保持する。
+   - PDF内に「小問一覧」(設問ごとの正誤・得点・配点・出題項目①②③)があれば、設問ごとに
+     読み取り、出題項目タグ(例:「通信文の読解」「メール」「内容一致」)と単元マスタを
+     突き合わせて`unit_id`を推定する。単元推定の確信度ルールは手順1の写真読み取りと同じ
+     (0.7未満は`confidence`を下げ、そのPDFの`needs_review`をtrueにする)。
+     `node analysis/helpers/insert-question-results.mjs '<JSON配列>'`で挿入する。各行の形式:
+     ```json
+     {"photo_id": "...", "unit_id": "...", "question_label": "大問1-3", "is_correct": true, "source": "pdf_mock_exam", "raw_topic_tags": {"level1": "通信文の読解", "level2": "メール", "level3": "内容一致"}, "mock_exam_id": "<上で保持したexam.id>", "confidence": 0.9}
+     ```
+   - 挿入後、`node analysis/helpers/mark-photo-status.mjs <photo_id> analyzed '<result_json>'` で
+     `photos.status`を`analyzed`にする。
+3. **`kind=pdf_quiz`の場合**(大問別演習の解説PDF、東進タグなし):
+   - 設問ごとの「正解・あなたの解答・配点・あなたの得点」表と、プローズの解説文を読む。
+     `得点 == 配点`なら正解、それ以外は不正解として扱う。
+   - 解説文中の出題ジャンルの記述(例:「語の意味の問題」「返り点の付け方と書き下し文の
+     組合せ問題」)から単元を推定する。写真の演習ページ読み取りと同じ確信度ルールに従う
+     (東進タグが無い分、写真読み取りと同程度の確信度になりやすいことを踏まえる)。
+   - `node analysis/helpers/insert-question-results.mjs '<JSON配列>'`で挿入する。各行の形式:
+     ```json
+     {"photo_id": "...", "unit_id": "...", "question_label": "問1", "is_correct": true, "source": "pdf_quiz", "confidence": 0.75}
+     ```
+   - 挿入後、`mark-photo-status.mjs <photo_id> analyzed`で`analyzed`にする。
+4. **読み取り不能な場合**(表構造が崩れている、パスワード保護、想定外レイアウト等):
+   手順1の写真読み取りと同様に`mark-photo-status.mjs <photo_id> failed '<result_json>'`で
+   `failed`にし、理由を記録する。日次レポートで必ず報告する。
+5. 全pending PDFを処理し終えるまで1〜4を繰り返す。PDFが0件ならこのステップはスキップしてよい。
+
 ### 2. weakness_scores の再計算
 
 `node analysis/helpers/recompute-weakness-scores.mjs` を実行する。
@@ -156,6 +200,7 @@ score = (1 - 直近30件の正答率) × (1 + log(1 + 経過日数) / 2)
    - 今日の総学習時間・科目別内訳
    - 演習の正答状況(正解/不正解数、誤答タイプの傾向があれば言及)
    - 小論文答案があれば講評の要約
+   - 模試を取り込んだ日は、模試名・総合得点/偏差値・科目別偏差値・志望判定(A〜E/Z)の要約
    - 判読不能だった写真の件数と再撮影のお願い(該当する場合)
    - 明日の復習提案(手順3で生成した内容)の要約
 4. 作成したMarkdownを一時ファイル(例: `analysis/tmp/daily-report.md`)に書き出し、
