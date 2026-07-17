@@ -367,11 +367,11 @@ export default function StatsPage() {
                           <Box
                             key={unit.id}
                             title={
-                              w
+                              (w
                                 ? `${unit.name} score:${score.toFixed(2)} accuracy:${
                                     w.accuracy != null ? Math.round(w.accuracy * 100) + "%" : "-"
-                                  }${sourceBreakdown ? ` ${sourceBreakdown}` : ""}`
-                                : unit.name
+                                  }`
+                                : unit.name) + (sourceBreakdown ? ` ${sourceBreakdown}` : "")
                             }
                             sx={{
                               px: 1,
