@@ -50,6 +50,24 @@ type EssayReview = {
 type Snapshot = { unit_id: string; snapshot_date: string; state: LearningState; accuracy: number | null; weakness_score: number; understanding: Understanding | null; evidence_json: Record<string, unknown> | null };
 type QuestionResult = { id: string; photo_id: string; unit_id: string | null; question_label: string | null; is_correct: boolean | null; error_type: string | null; confidence: number | null; created_at: string };
 type ReviewPhoto = { id: string; storage_path: string; confidence: number | null; needs_review: boolean; created_at: string };
+type MockExamJudgment = { rank: number; school: string; deviation: number; judgment: string };
+type MockExam = {
+  id: string;
+  exam_title: string;
+  taken_date: string;
+  total_score: number | null;
+  total_deviation: number | null;
+  judgments_json: MockExamJudgment[] | null;
+};
+type MockExamScore = {
+  id: string;
+  mock_exam_id: string;
+  subject_id: string;
+  score: number | null;
+  max_score: number | null;
+  score_rate: number | null;
+  deviation_value: number | null;
+};
 
 function heatColor(score: number, max: number) {
   if (max <= 0) return "#f5f5f5";
@@ -93,6 +111,9 @@ export default function StatsPage() {
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [questionResults, setQuestionResults] = useState<QuestionResult[]>([]);
   const [reviewPhotos, setReviewPhotos] = useState<ReviewPhoto[]>([]);
+  const [mockExams, setMockExams] = useState<MockExam[]>([]);
+  const [mockExamScores, setMockExamScores] = useState<MockExamScore[]>([]);
+  const [mockExamSubjectId, setMockExamSubjectId] = useState<string>("");
   const [selectedUnitId, setSelectedUnitId] = useState<string | null>(null);
   const [weeklyMinutes, setWeeklyMinutes] = useState<number | null>(null);
   const [tab, setTab] = useState(0);
@@ -113,6 +134,8 @@ export default function StatsPage() {
           snapshotsRes,
           questionResultsRes,
           reviewPhotosRes,
+          mockExamsRes,
+          mockExamScoresRes,
         ] = await Promise.all([
           supabase.from("subjects").select("id, name, color, sort_order").order("sort_order"),
           supabase.from("units").select("id, subject_id, name, sort_order").order("sort_order"),
@@ -134,6 +157,8 @@ export default function StatsPage() {
           supabase.from("unit_state_snapshots").select("unit_id,snapshot_date,state,accuracy,weakness_score,understanding,evidence_json").order("snapshot_date", { ascending: false }).limit(500),
           supabase.from("question_results").select("id,photo_id,unit_id,question_label,is_correct,error_type,confidence,created_at").order("created_at", { ascending: false }).limit(500),
           supabase.from("photos").select("id,storage_path,confidence,needs_review,created_at").eq("needs_review", true).order("created_at", { ascending: false }),
+          supabase.from("mock_exams").select("id, exam_title, taken_date, total_score, total_deviation, judgments_json").order("taken_date", { ascending: true }),
+          supabase.from("mock_exam_scores").select("id, mock_exam_id, subject_id, score, max_score, score_rate, deviation_value"),
         ]);
         if (!active) return;
         if (
@@ -144,6 +169,7 @@ export default function StatsPage() {
           reportsRes.error ||
           essaysRes.error
           || snapshotsRes.error || questionResultsRes.error || reviewPhotosRes.error
+          || mockExamsRes.error || mockExamScoresRes.error
         ) {
           setConfigError(
             "データを取得できませんでした。Supabaseの接続設定(.env.local)を確認してください。",
@@ -159,6 +185,8 @@ export default function StatsPage() {
         setSnapshots((snapshotsRes.data ?? []) as Snapshot[]);
         setQuestionResults((questionResultsRes.data ?? []) as QuestionResult[]);
         setReviewPhotos((reviewPhotosRes.data ?? []) as ReviewPhoto[]);
+        setMockExams((mockExamsRes.data ?? []) as MockExam[]);
+        setMockExamScores((mockExamScoresRes.data ?? []) as MockExamScore[]);
       } catch {
         if (active) setConfigError("Supabaseに接続できません。.env.local を確認してください。");
       } finally {
@@ -232,6 +260,17 @@ export default function StatsPage() {
     });
     return { weekLabels: weeks, chartData: data, maxMinutes: max };
   }, [sessions]);
+
+  const mockExamDeviationSeries = useMemo(() => {
+    return mockExams.map((exam) => {
+      const label = exam.taken_date.slice(5);
+      if (!mockExamSubjectId) {
+        return { examId: exam.id, label, deviation: exam.total_deviation };
+      }
+      const row = mockExamScores.find((score) => score.mock_exam_id === exam.id && score.subject_id === mockExamSubjectId);
+      return { examId: exam.id, label, deviation: row?.deviation_value ?? null };
+    });
+  }, [mockExams, mockExamScores, mockExamSubjectId]);
 
   if (loading) {
     return (
@@ -401,6 +440,65 @@ export default function StatsPage() {
                 </Box>
               ))}
             </Box>
+          )}
+        </Paper>
+
+        {/* 模試の記録 */}
+        <Paper variant="outlined" sx={{ p: 2 }}>
+          <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1.5 }}>
+            模試の記録
+          </Typography>
+          {mockExams.length === 0 ? (
+            <Typography variant="body2">まだ模試の記録がありません</Typography>
+          ) : (
+            <Stack spacing={2}>
+              <TextField
+                select
+                size="small"
+                label="偏差値の対象"
+                value={mockExamSubjectId}
+                onChange={(event) => setMockExamSubjectId(event.target.value)}
+              >
+                <MenuItem value="">総合</MenuItem>
+                {subjects.map((subject) => (
+                  <MenuItem key={subject.id} value={subject.id}>{subject.name}</MenuItem>
+                ))}
+              </TextField>
+              <Box sx={{ display: "flex", alignItems: "flex-end", gap: 1, height: 100 }}>
+                {mockExamDeviationSeries.map((point) => (
+                  <Box key={point.examId} sx={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end", height: "100%" }}>
+                    <Typography variant="caption">{point.deviation != null ? point.deviation.toFixed(1) : "-"}</Typography>
+                    <Box
+                      sx={{
+                        width: "100%",
+                        backgroundColor: "primary.main",
+                        borderRadius: "3px 3px 0 0",
+                        height: point.deviation != null ? `${Math.max(4, Math.min(100, ((point.deviation - 30) / 40) * 100))}%` : 0,
+                      }}
+                    />
+                    <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5 }}>{point.label}</Typography>
+                  </Box>
+                ))}
+              </Box>
+              <Stack divider={<Divider />} spacing={1}>
+                {mockExams.slice().reverse().map((exam) => {
+                  const topJudgment = exam.judgments_json?.[0];
+                  return (
+                    <Box key={exam.id}>
+                      <Stack direction="row" spacing={1} alignItems="center">
+                        <Typography variant="body2" fontWeight={700}>{exam.exam_title}</Typography>
+                        <Typography variant="caption" color="text.secondary">{exam.taken_date}</Typography>
+                      </Stack>
+                      <Typography variant="body2">
+                        {exam.total_score != null ? `総合得点 ${exam.total_score}` : ""}
+                        {exam.total_deviation != null ? ` / 偏差値 ${exam.total_deviation}` : ""}
+                        {topJudgment ? ` / ${topJudgment.school} 判定${topJudgment.judgment}` : ""}
+                      </Typography>
+                    </Box>
+                  );
+                })}
+              </Stack>
+            </Stack>
           )}
         </Paper>
 
