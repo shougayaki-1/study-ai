@@ -166,11 +166,11 @@ create index if not exists idx_mock_exam_scores_mock_exam_id on mock_exam_scores
    ソースにしているため、PDF由来のデータが入れば自動的に反映される(コード変更不要)。
    ただし今後どの単元がどの情報源(写真/模試PDF/演習PDF)由来かを区別できるよう、
    セルのツールチップに`source`別の件数を出す(例: 「模試2件・演習PDF3件」)。
-4. **要確認(needs_review)キュー**: AIの単元マッピングの確信度が低い設問(既存の
-   `confidence < 0.7` → `needs_review`ルールを流用)を、分析(`/stats`)ページに
-   新しいカードとして一覧表示する(他の分析要素と同じ並び)。各行は「設問の生タグ・
-   AIが推定した単元・得点」を表示し、単元をタップで選び直せるセレクタを置く。
-   確定すると該当`question_results`行の`unit_id`を更新し、`needs_review`を解除する。
+4. **要確認(needs_review)キュー**: [stats/page.tsx:475-538](../../../src/app/stats/page.tsx)に
+   既に実装済み(`photos.needs_review`が立った写真をアラート表示し、単元詳細ダイアログから
+   設問ごとに○/×・誤答タイプを修正できる)。PDF由来の`question_results`も同じ
+   `confidence`/`needs_review`ルールに従わせれば、コード変更なしにそのまま機能する。
+   新規実装は不要、取り込み処理側が既存ルールを守ることだけを保証すればよい。
 
 ## エラーハンドリング・エッジケース
 
