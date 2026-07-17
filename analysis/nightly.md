@@ -123,7 +123,12 @@ Node標準機能のみで完結する)。
      `[{"rank":1,"school":"...","deviation":62.7,"judgment":"A"}, ...]`の形でまとめる。
      無ければ`null`のままでよい。
    - `node analysis/helpers/insert-mock-exam.mjs '<模試サマリJSON>' '<科目別得点JSON配列>'`
-     で`mock_exams`・`mock_exam_scores`に挿入し、返り値の`exam.id`を保持する。
+     で`mock_exams`・`mock_exam_scores`に挿入し、返り値の`exam.id`を保持する。模試サマリJSONの形式:
+     ```json
+     {"photo_id": "<現在処理中の写真のid>", "exam_title": "...", "taken_date": "...", "total_score": 81, "total_deviation": null, "judgments_json": null}
+     ```
+     `photo_id`には必ず現在処理中の写真(このPDF)のidを設定し、模試結果が元のPDFに
+     遡れるようにする。
    - PDF内に「小問一覧」(設問ごとの正誤・得点・配点・出題項目①②③)があれば、設問ごとに
      読み取り、出題項目タグ(例:「通信文の読解」「メール」「内容一致」)と単元マスタを
      突き合わせて`unit_id`を推定する。単元推定の確信度ルールは手順1の写真読み取りと同じ

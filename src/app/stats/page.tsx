@@ -48,7 +48,9 @@ type EssayReview = {
   created_at: string;
 };
 type Snapshot = { unit_id: string; snapshot_date: string; state: LearningState; accuracy: number | null; weakness_score: number; understanding: Understanding | null; evidence_json: Record<string, unknown> | null };
-type QuestionResult = { id: string; photo_id: string; unit_id: string | null; question_label: string | null; is_correct: boolean | null; error_type: string | null; confidence: number | null; created_at: string };
+type QuestionResult = { id: string; photo_id: string; unit_id: string | null; question_label: string | null; is_correct: boolean | null; error_type: string | null; confidence: number | null; created_at: string; source: string };
+
+const SOURCE_LABELS: Record<string, string> = { photo: "写真", pdf_mock_exam: "模試", pdf_quiz: "演習PDF" };
 type ReviewPhoto = { id: string; storage_path: string; confidence: number | null; needs_review: boolean; created_at: string };
 type MockExamJudgment = { rank: number; school: string; deviation: number; judgment: string };
 type MockExam = {
@@ -155,7 +157,7 @@ export default function StatsPage() {
             .order("created_at", { ascending: false })
             .limit(10),
           supabase.from("unit_state_snapshots").select("unit_id,snapshot_date,state,accuracy,weakness_score,understanding,evidence_json").order("snapshot_date", { ascending: false }).limit(500),
-          supabase.from("question_results").select("id,photo_id,unit_id,question_label,is_correct,error_type,confidence,created_at").order("created_at", { ascending: false }).limit(500),
+          supabase.from("question_results").select("id,photo_id,unit_id,question_label,is_correct,error_type,confidence,created_at,source").order("created_at", { ascending: false }).limit(500),
           supabase.from("photos").select("id,storage_path,confidence,needs_review,created_at").eq("needs_review", true).order("created_at", { ascending: false }),
           supabase.from("mock_exams").select("id, exam_title, taken_date, total_score, total_deviation, judgments_json").order("taken_date", { ascending: true }),
           supabase.from("mock_exam_scores").select("id, mock_exam_id, subject_id, score, max_score, score_rate, deviation_value"),
@@ -210,6 +212,17 @@ export default function StatsPage() {
     () => weaknesses.reduce((m, w) => Math.max(m, w.score ?? 0), 0),
     [weaknesses],
   );
+
+  const sourceCountsByUnit = useMemo(() => {
+    const map = new Map<string, Record<string, number>>();
+    questionResults.forEach((r) => {
+      if (!r.unit_id) return;
+      const counts = map.get(r.unit_id) ?? {};
+      counts[r.source] = (counts[r.source] ?? 0) + 1;
+      map.set(r.unit_id, counts);
+    });
+    return map;
+  }, [questionResults]);
 
   const estimatedWeeklyMinutes = useMemo(() => Math.round(sessions.reduce((sum, session) => sum + session.minutes, 0) / 8 / 5) * 5, [sessions]);
   const weeklyReview = useMemo(() => {
@@ -346,6 +359,10 @@ export default function StatsPage() {
                       {subjectUnits.map((unit) => {
                         const w = weaknessByUnit.get(unit.id);
                         const score = w?.score ?? 0;
+                        const sourceCounts = sourceCountsByUnit.get(unit.id);
+                        const sourceBreakdown = sourceCounts
+                          ? Object.entries(sourceCounts).filter(([, n]) => n > 0).map(([src, n]) => `${SOURCE_LABELS[src] ?? src}${n}件`).join("・")
+                          : "";
                         return (
                           <Box
                             key={unit.id}
@@ -353,7 +370,7 @@ export default function StatsPage() {
                               w
                                 ? `${unit.name} score:${score.toFixed(2)} accuracy:${
                                     w.accuracy != null ? Math.round(w.accuracy * 100) + "%" : "-"
-                                  }`
+                                  }${sourceBreakdown ? ` ${sourceBreakdown}` : ""}`
                                 : unit.name
                             }
                             sx={{
