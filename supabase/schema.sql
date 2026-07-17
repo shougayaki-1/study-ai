@@ -109,6 +109,11 @@ create table if not exists photos (
   created_at timestamptz not null default now()
 );
 
+-- 演習写真・小論文答案・模試/演習PDFの取り込み対応
+alter table photos drop constraint if exists photos_kind_check;
+alter table photos add constraint photos_kind_check
+  check (kind in ('exercise', 'essay', 'pdf_mock_exam', 'pdf_quiz'));
+
 -- 写真から抽出した問題ごとの正誤
 create table if not exists question_results (
   id uuid primary key default gen_random_uuid(),
@@ -214,10 +219,44 @@ create table if not exists analysis_runs (
   completed_at timestamptz
 );
 
+-- 模試サマリ(東進「Web成績表」PDF等から取り込む科目別得点・偏差値・志望判定)
+create table if not exists mock_exams (
+  id uuid primary key default gen_random_uuid(),
+  photo_id uuid references photos(id) on delete set null,
+  provider text not null default 'toshin',
+  exam_title text not null,
+  taken_date date not null,
+  total_score numeric,
+  total_deviation numeric,
+  judgments_json jsonb,
+  created_at timestamptz not null default now()
+);
+
+-- 模試の科目別得点・偏差値
+create table if not exists mock_exam_scores (
+  id uuid primary key default gen_random_uuid(),
+  mock_exam_id uuid not null references mock_exams(id) on delete cascade,
+  subject_id uuid not null references subjects(id) on delete cascade,
+  score numeric,
+  max_score numeric,
+  score_rate numeric,
+  deviation_value numeric,
+  national_avg_score numeric,
+  rank integer,
+  total_test_takers integer,
+  created_at timestamptz not null default now()
+);
+
 alter table reports add column if not exists analysis_run_id uuid references analysis_runs(id) on delete set null;
 alter table photos add column if not exists confidence numeric check (confidence is null or (confidence >= 0 and confidence <= 1));
 alter table photos add column if not exists needs_review boolean not null default false;
 alter table question_results add column if not exists confidence numeric;
+alter table question_results add column if not exists source text not null default 'photo';
+alter table question_results drop constraint if exists question_results_source_check;
+alter table question_results add constraint question_results_source_check
+  check (source in ('photo', 'pdf_mock_exam', 'pdf_quiz'));
+alter table question_results add column if not exists raw_topic_tags jsonb;
+alter table question_results add column if not exists mock_exam_id uuid references mock_exams(id) on delete set null;
 alter table question_results add column if not exists corrected_at timestamptz;
 alter table review_tasks add column if not exists status text not null default 'pending';
 alter table review_tasks add column if not exists completed_at timestamptz;
@@ -273,6 +312,10 @@ create index if not exists idx_review_tasks_due_date on review_tasks(due_date);
 create index if not exists idx_events_due_date on events(due_date);
 create index if not exists idx_unit_state_snapshots_date on unit_state_snapshots(snapshot_date desc);
 create index if not exists idx_review_tasks_status_due on review_tasks(status, due_date);
+create index if not exists idx_mock_exam_scores_subject_id on mock_exam_scores(subject_id);
+create index if not exists idx_mock_exam_scores_mock_exam_id on mock_exam_scores(mock_exam_id);
+create index if not exists idx_mock_exams_taken_date on mock_exams(taken_date desc);
+create index if not exists idx_question_results_mock_exam_id on question_results(mock_exam_id);
 
 -- ============================================================
 -- RLS: 認証済みユーザー(本人)のみ読み書き可
@@ -296,6 +339,8 @@ alter table weekly_plans enable row level security;
 alter table analysis_runs enable row level security;
 alter table event_subjects enable row level security;
 alter table event_units enable row level security;
+alter table mock_exams enable row level security;
+alter table mock_exam_scores enable row level security;
 
 do $$
 declare
@@ -307,7 +352,7 @@ begin
       'question_results', 'essay_reviews', 'weakness_scores',
       'review_tasks', 'events', 'reports', 'push_subscriptions',
       'material_units', 'unit_state_snapshots', 'weekly_plans', 'analysis_runs',
-      'event_subjects', 'event_units'
+      'event_subjects', 'event_units', 'mock_exams', 'mock_exam_scores'
     ])
   loop
     execute format(
