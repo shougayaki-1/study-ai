@@ -45,7 +45,7 @@ for (const unit of units.filter((row) => row.is_target && subjectById.get(row.su
     return acc;
   }, {});
   const compatibleMaterials = materialUnits.filter((link) => link.unit_id === unit.id).map((link) => materialById.get(link.material_id)).filter(Boolean);
-  const evidence = { attempts: unitResults.length, sessionCount: unitSessions.length, recent30Accuracy: accuracy, recent10Accuracy, improving: accuracy != null && recentAccuracy != null && recentAccuracy >= accuracy + 0.1, elapsedDays, errors, previousTasks: tasks.filter((task) => task.unit_id === unit.id).slice(0, 10), materials: compatibleMaterials };
+  const evidence = { attempts: unitResults.length, sessionCount: unitSessions.length, recent30Accuracy: accuracy, recent10Accuracy: recentAccuracy, improving: accuracy != null && recentAccuracy != null && recentAccuracy >= accuracy + 0.1, elapsedDays, errors, previousTasks: tasks.filter((task) => task.unit_id === unit.id).slice(0, 10), materials: compatibleMaterials };
   stateRows.push({ unit_id: unit.id, snapshot_date: today, state, weakness_score: Math.round(weaknessScore * 1000) / 1000, accuracy: accuracy == null ? null : Math.round(accuracy * 1000) / 1000, understanding: currentUnderstanding, last_studied_at: lastDate, evidence_json: evidence, unit_name: unit.name, subject_name: subjectById.get(unit.subject_id)?.name });
 }
 

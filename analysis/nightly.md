@@ -1,15 +1,28 @@
 # 夜間分析バッチ プロンプト
 
-このファイルは Mac 上の Claude Code をヘッドレス実行(`claude -p`)する際に読み込ませる、
-夜間分析バッチの本体プロンプトである。DESIGN.md セクション6の処理フローを実装する。
+このファイルは、Mac上でエージェント型CLI(Claude Code の `claude -p`、または
+Codex CLI の `codex exec`)をheadless実行する際に読み込ませる、夜間分析バッチの
+本体プロンプトである。DESIGN.md セクション6の処理フローを実装する。
+**このプロンプトはどちらのCLIで実行しても同じ内容・同じ判断根拠になるよう、
+特定のツール名(Claude Codeの `Bash`/`Read` など)に依存しない書き方にしている。**
 
-実行例:
+実行例(手動実行、どちらか使える方でよい):
 ```
 cd /Users/shoug/Documents/GitHub/study-ai
+
+# Claude Code
 claude -p "$(cat analysis/nightly.md)" --allowedTools "Bash,Read"
+
+# Codex CLI
+codex exec --sandbox workspace-write \
+  --config sandbox_workspace_write.network_access=true \
+  "$(cat analysis/nightly.md)"
 ```
 
-具体的な起動コマンド・スケジュール設定は `analysis/README.md` を参照。
+`STUDY_AI_AGENT_CLI=claude` または `STUDY_AI_AGENT_CLI=codex` を指定して
+`analysis/run-nightly.sh` を実行すれば、上記コマンドの違いを意識せず切り替えられる。
+具体的な起動コマンドは `analysis/README.md` を参照(**自動スケジュール実行は現状セットアップしていない。
+毎回手動で起動する運用**)。
 
 ---
 
@@ -19,7 +32,8 @@ claude -p "$(cat analysis/nightly.md)" --allowedTools "Bash,Read"
 Supabaseに保存された当日分の勉強記録・演習写真・小論文答案を読み取り、
 弱点スコアを再計算し、翌日の復習提案を生成し、日次(日曜は週次も)レポートを保存する。
 
-**Supabaseへのアクセスは `analysis/helpers/*.mjs` の Node スクリプトを `Bash` ツールで
+**Supabaseへのアクセスは `analysis/helpers/*.mjs` の Node スクリプトを、シェルコマンド実行
+(Claude Codeでは `Bash` ツール、Codex CLIでは組み込みのシェル実行)で
 `node analysis/helpers/xxx.mjs ...` として呼び出すことで行う。** 各スクリプトは
 `analysis/.env` の `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` を自動で読み込み、
 標準出力にJSONを返す。スクリプトの一覧と使い方は各ファイル冒頭のコメントを参照(不明な場合は
@@ -49,7 +63,8 @@ Node標準機能のみで完結する)。
 1. `node analysis/helpers/list-pending-photos.mjs` で `status=pending` の写真一覧
    (`id`, `session_id`, `storage_path`, `kind`, `created_at`) を取得する。
 2. 各写真について `node analysis/helpers/download-photo.mjs <storage_path>` で
-   `analysis/tmp/` にダウンロードし、`Read` ツール(画像対応)でファイルを読む。
+   `analysis/tmp/` にダウンロードし、画像を読み込むツール(Claude Codeでは `Read` ツール、
+   Codex CLIでは組み込みの `view_image` ツール)でファイルを読む。
 3. **写真の読み取り規約**(DESIGN.md 5.2 / セクション6):
    - 撮影対象は「丸付け済み(○✕記入済み)の問題集・演習ページ」である。
    - 読み取るべき情報:
