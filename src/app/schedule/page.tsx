@@ -21,6 +21,7 @@ import CircularProgress from "@mui/material/CircularProgress";
 import Alert from "@mui/material/Alert";
 import AddIcon from "@mui/icons-material/Add";
 import DeleteIcon from "@mui/icons-material/Delete";
+import EditIcon from "@mui/icons-material/Edit";
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import { createClient } from "@/lib/supabase/client";
@@ -56,6 +57,7 @@ export default function SchedulePage() {
   const [units, setUnits] = useState<UnitRow[]>([]);
 
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingEventId, setEditingEventId] = useState<string | null>(null);
   const [newKind, setNewKind] = useState<EventKind>("assignment");
   const [newTitle, setNewTitle] = useState("");
   const [newDate, setNewDate] = useState(todayStr());
@@ -107,9 +109,21 @@ export default function SchedulePage() {
   }, []);
 
   const openDialog = () => {
+    setEditingEventId(null);
     setNewKind("assignment");
     setNewTitle("");
     setNewDate(todayStr());
+    setNewSubjectId("");
+    setNewUnitId("");
+    setFormError(null);
+    setDialogOpen(true);
+  };
+
+  const openEditDialog = (event: EventRow) => {
+    setEditingEventId(event.id);
+    setNewKind(event.kind);
+    setNewTitle(event.title);
+    setNewDate(event.due_date);
     setNewSubjectId("");
     setNewUnitId("");
     setFormError(null);
@@ -124,17 +138,16 @@ export default function SchedulePage() {
     setSaving(true);
     setFormError(null);
     try {
-      const { data, error } = await supabase.from("events").insert({
-        kind: newKind,
-        title: newTitle.trim(),
-        due_date: newDate,
-      }).select("id").single();
+      const payload = { kind: newKind, title: newTitle.trim(), due_date: newDate };
+      const { data, error } = editingEventId
+        ? await supabase.from("events").update(payload).eq("id", editingEventId).select("id").single()
+        : await supabase.from("events").insert(payload).select("id").single();
       if (error) throw error;
-      if (newSubjectId) {
+      if (!editingEventId && newSubjectId) {
         const { error: subjectError } = await supabase.from("event_subjects").insert({ event_id: data.id, subject_id: newSubjectId });
         if (subjectError) throw subjectError;
       }
-      if (newUnitId) {
+      if (!editingEventId && newUnitId) {
         const { error: unitError } = await supabase.from("event_units").insert({ event_id: data.id, unit_id: newUnitId });
         if (unitError) throw unitError;
       }
@@ -169,6 +182,10 @@ export default function SchedulePage() {
 
   const upcoming = useMemo(
     () => events.filter((e) => !e.done).sort((a, b) => a.due_date.localeCompare(b.due_date)),
+    [events],
+  );
+  const completed = useMemo(
+    () => events.filter((e) => e.done).sort((a, b) => b.due_date.localeCompare(a.due_date)),
     [events],
   );
   const eventsByDate = useMemo(() => {
@@ -342,6 +359,9 @@ export default function SchedulePage() {
                         {e.due_date} ({d >= 0 ? `あと${d}日` : "期限超過"})
                       </Typography>
                     </Box>
+                    <IconButton size="small" aria-label="予定を編集" onClick={() => openEditDialog(e)}>
+                      <EditIcon fontSize="small" />
+                    </IconButton>
                     <IconButton size="small" onClick={() => deleteEvent(e.id)}>
                       <DeleteIcon fontSize="small" />
                     </IconButton>
@@ -351,10 +371,14 @@ export default function SchedulePage() {
             </Stack>
           )}
         </Paper>
+        {completed.length > 0 && <Paper variant="outlined" sx={{ p: 2 }}>
+          <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>完了済み（チェックを外すと復元）</Typography>
+          <Stack spacing={0.5}>{completed.map((event) => <Stack key={event.id} direction="row" alignItems="center" spacing={1}><Checkbox size="small" checked onChange={() => toggleDone(event)} /><Typography variant="body2" sx={{ flex: 1, textDecoration: "line-through", color: "text.secondary" }}>{event.title}</Typography><Typography variant="caption" color="text.secondary">{event.due_date}</Typography></Stack>)}</Stack>
+        </Paper>}
       </Stack>
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="xs">
-        <DialogTitle>予定を追加</DialogTitle>
+        <DialogTitle>{editingEventId ? "締切を編集" : "予定を追加"}</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 0.5 }}>
             <ToggleButtonGroup
@@ -378,14 +402,14 @@ export default function SchedulePage() {
               size="small"
               placeholder="例: 数学課題プリント提出"
             />
-            <TextField select label="対象科目（任意）" value={newSubjectId} onChange={(event) => { setNewSubjectId(event.target.value); setNewUnitId(""); }} fullWidth size="small">
+            {!editingEventId && <TextField select label="対象科目（任意）" value={newSubjectId} onChange={(event) => { setNewSubjectId(event.target.value); setNewUnitId(""); }} fullWidth size="small">
               <MenuItem value="">指定しない</MenuItem>
               {subjects.map((subject) => <MenuItem key={subject.id} value={subject.id}>{subject.name}</MenuItem>)}
-            </TextField>
-            <TextField select label="対象単元（任意）" value={newUnitId} onChange={(event) => setNewUnitId(event.target.value)} disabled={!newSubjectId} fullWidth size="small">
+            </TextField>}
+            {!editingEventId && <TextField select label="対象単元（任意）" value={newUnitId} onChange={(event) => setNewUnitId(event.target.value)} disabled={!newSubjectId} fullWidth size="small">
               <MenuItem value="">指定しない</MenuItem>
               {units.filter((unit) => unit.subject_id === newSubjectId).map((unit) => <MenuItem key={unit.id} value={unit.id}>{unit.name}</MenuItem>)}
-            </TextField>
+            </TextField>}
             <TextField
               label="締切日"
               type="date"

@@ -40,6 +40,8 @@ type Entry = {
   understanding: Understanding;
   commonTestYear: string;
   commonTestSection: string;
+  commonTestMode: "by_year" | "by_section";
+  memo: string;
 };
 type PreviousSession = { unit_id: string | null; understanding: Understanding | null };
 type SavedSummary = {
@@ -53,7 +55,7 @@ type SavedSummary = {
 
 const TIME_OPTIONS = [30, 45, 60, 90];
 const COMMON_TEST_YEARS = Array.from({ length: new Date().getFullYear() - 2020 }, (_, index) => String(new Date().getFullYear() - index));
-const COMMON_TEST_SECTIONS = ["年度通し", ...Array.from({ length: 8 }, (_, index) => `大問${index + 1}`)];
+const COMMON_TEST_SECTIONS = Array.from({ length: 8 }, (_, index) => `大問${index + 1}`);
 const DIFFICULTY_LABELS: Record<string, string> = { basic: "基礎", standard: "標準", advanced: "応用" };
 
 function todayString() {
@@ -71,7 +73,9 @@ function newEntry(subjectId = ""): Entry {
     minutes: 60,
     understanding: "uncertain",
     commonTestYear: String(new Date().getFullYear()),
-    commonTestSection: "年度通し",
+    commonTestSection: "大問1",
+    commonTestMode: "by_year",
+    memo: "",
   };
 }
 
@@ -150,9 +154,10 @@ export default function RecordPage() {
       minutes: entry.minutes,
       study_date: studyDate,
       record_type: entry.recordType,
-      common_test_year: entry.recordType === "common_test" ? Number(entry.commonTestYear) : null,
-      common_test_section: entry.recordType === "common_test" ? entry.commonTestSection : null,
+      common_test_year: entry.recordType === "common_test" && entry.commonTestMode === "by_year" ? Number(entry.commonTestYear) : null,
+      common_test_section: entry.recordType === "common_test" && entry.commonTestMode === "by_section" ? entry.commonTestSection : null,
       understanding: entry.understanding,
+      memo: entry.memo.trim() || null,
       batch_id: batchId,
     }));
     const { data, error: insertError } = await supabase
@@ -279,13 +284,16 @@ export default function RecordPage() {
                   {RECORD_TYPES.map(([value, label]) => <ToggleButton key={value} value={value}>{label}</ToggleButton>)}
                 </ToggleButtonGroup>
                 {entry.recordType === "common_test" ? (
-                  <Stack direction="row" spacing={1}>
-                    <TextField select label="年度" value={entry.commonTestYear} onChange={(event) => updateEntry(entry.key, { commonTestYear: event.target.value })} size="small" fullWidth>
+                  <Stack spacing={1}>
+                    <ToggleButtonGroup exclusive fullWidth size="small" value={entry.commonTestMode} onChange={(_, value: Entry["commonTestMode"] | null) => value && updateEntry(entry.key, { commonTestMode: value })}>
+                      <ToggleButton value="by_year">年度別（共通テスト）</ToggleButton>
+                      <ToggleButton value="by_section">大問別（センター試験）</ToggleButton>
+                    </ToggleButtonGroup>
+                    {entry.commonTestMode === "by_year" ? <TextField select label="年度" value={entry.commonTestYear} onChange={(event) => updateEntry(entry.key, { commonTestYear: event.target.value })} size="small" fullWidth>
                       {COMMON_TEST_YEARS.map((year) => <MenuItem key={year} value={year}>{year}年度</MenuItem>)}
-                    </TextField>
-                    <TextField select label="大問" value={entry.commonTestSection} onChange={(event) => updateEntry(entry.key, { commonTestSection: event.target.value, unitId: "" })} size="small" fullWidth>
+                    </TextField> : <TextField select label="大問" value={entry.commonTestSection} onChange={(event) => updateEntry(entry.key, { commonTestSection: event.target.value, unitId: "" })} size="small" fullWidth>
                       {COMMON_TEST_SECTIONS.map((section) => <MenuItem key={section} value={section}>{section}</MenuItem>)}
-                    </TextField>
+                    </TextField>}
                   </Stack>
                 ) : (
                   <Stack direction="row" spacing={1}>
@@ -308,6 +316,7 @@ export default function RecordPage() {
                 <ToggleButtonGroup exclusive fullWidth value={entry.understanding} onChange={(_, value: Understanding | null) => value && updateEntry(entry.key, { understanding: value })} size="small">
                   {UNDERSTANDING_OPTIONS.map(([value, label]) => <ToggleButton key={value} value={value}>{label}</ToggleButton>)}
                 </ToggleButtonGroup>
+                <TextField label="コメント・メモ（任意）" value={entry.memo} onChange={(event) => updateEntry(entry.key, { memo: event.target.value })} multiline minRows={2} size="small" fullWidth placeholder="できたこと、迷ったこと、次回確認したいことなど" />
               </Stack>
             </Paper>
           );

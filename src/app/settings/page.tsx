@@ -24,6 +24,7 @@ import Alert from "@mui/material/Alert";
 import Chip from "@mui/material/Chip";
 import AddIcon from "@mui/icons-material/Add";
 import DeleteIcon from "@mui/icons-material/Delete";
+import LogoutIcon from "@mui/icons-material/Logout";
 import ArrowUpwardIcon from "@mui/icons-material/ArrowUpward";
 import ArrowDownwardIcon from "@mui/icons-material/ArrowDownward";
 import { createClient } from "@/lib/supabase/client";
@@ -54,7 +55,7 @@ export default function SettingsPage() {
   const [pushBusy, setPushBusy] = useState(false);
   const [pushError, setPushError] = useState<string | null>(null);
 
-  const [dialogKind, setDialogKind] = useState<"unit" | "material" | null>(null);
+  const [dialogKind, setDialogKind] = useState<"subject" | "unit" | "material" | null>(null);
   const [newName, setNewName] = useState("");
   const [newMaterialKind, setNewMaterialKind] = useState<string>(MATERIAL_KINDS[0]);
   const [newMaterialDifficulty, setNewMaterialDifficulty] = useState("standard");
@@ -166,7 +167,7 @@ export default function SettingsPage() {
     [materials, selectedSubjectId],
   );
 
-  const openAddDialog = (kind: "unit" | "material") => {
+  const openAddDialog = (kind: "subject" | "unit" | "material") => {
     setDialogKind(kind);
     setNewName("");
     setNewMaterialKind(MATERIAL_KINDS[0]);
@@ -175,14 +176,19 @@ export default function SettingsPage() {
   };
 
   const submitAdd = async () => {
-    if (!selectedSubjectId || !newName.trim()) {
+    if ((dialogKind !== "subject" && !selectedSubjectId) || !newName.trim()) {
       setFormError("名前を入力してください");
       return;
     }
     setSaving(true);
     setFormError(null);
     try {
-      if (dialogKind === "unit") {
+      if (dialogKind === "subject") {
+        const maxSort = subjects.reduce((m, subject) => Math.max(m, subject.sort_order), -1);
+        const { data, error } = await supabase.from("subjects").insert({ name: newName.trim(), sort_order: maxSort + 1 }).select("id").single();
+        if (error) throw error;
+        setSelectedSubjectId(data.id);
+      } else if (dialogKind === "unit") {
         const maxSort = unitsForSubject.reduce((m, u) => Math.max(m, u.sort_order), -1);
         const { error } = await supabase.from("units").insert({
           subject_id: selectedSubjectId,
@@ -267,6 +273,13 @@ export default function SettingsPage() {
     }
   };
 
+  const logout = async () => {
+    setConfigError(null);
+    const { error } = await supabase.auth.signOut();
+    if (error) setConfigError(error.message);
+    else window.location.assign("/login");
+  };
+
   const moveUnit = async (unit: Unit, direction: -1 | 1) => {
     const list = unitsForSubject;
     const idx = list.findIndex((u) => u.id === unit.id);
@@ -330,6 +343,7 @@ export default function SettingsPage() {
               ))}
             </Select>
           </FormControl>
+          <Button startIcon={<AddIcon />} size="small" sx={{ mb: 1.5 }} onClick={() => openAddDialog("subject")}>科目を追加</Button>
           {subjects.find((subject) => subject.id === selectedSubjectId) && (
             <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
               <Typography variant="body2">この科目を受験・学習対象にする</Typography>
@@ -458,10 +472,11 @@ export default function SettingsPage() {
             </Alert>
           )}
         </Paper>
+        <Button color="inherit" startIcon={<LogoutIcon />} onClick={logout}>ログアウト</Button>
       </Stack>
 
       <Dialog open={dialogKind !== null} onClose={() => setDialogKind(null)} fullWidth maxWidth="xs">
-        <DialogTitle>{dialogKind === "unit" ? "単元を追加" : "教材を追加"}</DialogTitle>
+        <DialogTitle>{dialogKind === "subject" ? "科目を追加" : dialogKind === "unit" ? "単元を追加" : "教材を追加"}</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 0.5 }}>
             <TextField

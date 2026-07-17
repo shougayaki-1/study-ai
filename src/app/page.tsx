@@ -50,6 +50,7 @@ export default function HomePage() {
 
   const [nextEvent, setNextEvent] = useState<EventRow | null>(null);
   const [tasks, setTasks] = useState<ReviewTask[]>([]);
+  const [showCompleted, setShowCompleted] = useState(false);
   const [latestReport, setLatestReport] = useState<Report | null>(null);
 
   const daysToExam = daysUntil(COMMON_TEST_DATE);
@@ -72,7 +73,7 @@ export default function HomePage() {
               "id, unit_id, material_id, range_text, reason, due_date, done, status, units(name), materials(name)",
             )
             .lte("due_date", today)
-            .eq("status", "pending")
+            .in("status", ["pending", "completed"])
             .order("due_date", { ascending: true }),
           supabase
             .from("reports")
@@ -206,7 +207,7 @@ export default function HomePage() {
             </Typography>
           ) : (
             <Stack spacing={0.5}>
-              {tasks.map((task) => (
+              {tasks.filter((task) => showCompleted || !task.done).map((task) => (
                 <Stack
                   key={task.id}
                   direction="row"
@@ -214,7 +215,7 @@ export default function HomePage() {
                   spacing={0.5}
                 >
                   <Checkbox
-                    checked={task.done}
+                  checked={task.done}
                     onChange={() => toggleTask(task)}
                     size="small"
                     sx={{ mt: -0.5 }}
@@ -241,6 +242,9 @@ export default function HomePage() {
               ))}
             </Stack>
           )}
+          {tasks.some((task) => task.done) && <Button size="small" onClick={() => setShowCompleted((current) => !current)}>
+            {showCompleted ? "完了済みを隠す" : "完了済みを表示・復元"}
+          </Button>}
         </Paper>
 
         {latestReport && (

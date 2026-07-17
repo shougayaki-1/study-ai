@@ -5,7 +5,6 @@ import Box from "@mui/material/Box";
 import Paper from "@mui/material/Paper";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
-import LinearProgress from "@mui/material/LinearProgress";
 import Chip from "@mui/material/Chip";
 import Tabs from "@mui/material/Tabs";
 import Tab from "@mui/material/Tab";
@@ -21,6 +20,7 @@ import DialogContent from "@mui/material/DialogContent";
 import DialogActions from "@mui/material/DialogActions";
 import EditIcon from "@mui/icons-material/Edit";
 import DeleteIcon from "@mui/icons-material/Delete";
+import PhotoCameraIcon from "@mui/icons-material/PhotoCamera";
 import { createClient } from "@/lib/supabase/client";
 import { UNDERSTANDING_LABELS, type Understanding } from "@/lib/learning";
 import { RECORD_TYPE_LABELS, type RecordType } from "@/lib/study-session";
@@ -29,6 +29,7 @@ type Session = {
   id: string; subject_id: string; unit_id: string | null; material_id: string | null;
   minutes: number; study_date: string; understanding: Understanding | null;
   record_type: RecordType; common_test_year: number | null; common_test_section: string | null;
+  memo: string | null;
 };
 type Named = { id: string; name: string; color?: string; subject_id?: string };
 type Result = { is_correct: boolean | null; created_at: string };
@@ -46,12 +47,14 @@ export default function RecordsPage() {
   const [period, setPeriod] = useState(0);
   const [editing, setEditing] = useState<Session | null>(null);
   const [saving, setSaving] = useState(false);
+  const [photoSession, setPhotoSession] = useState<Session | null>(null);
+  const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
     const since = new Date();
     since.setDate(since.getDate() - 90);
     Promise.all([
-      supabase.from("study_sessions").select("id,subject_id,unit_id,material_id,minutes,study_date,understanding,record_type,common_test_year,common_test_section").gte("study_date", since.toISOString().slice(0, 10)).order("study_date", { ascending: false }),
+      supabase.from("study_sessions").select("id,subject_id,unit_id,material_id,minutes,study_date,understanding,record_type,common_test_year,common_test_section,memo").gte("study_date", since.toISOString().slice(0, 10)).order("study_date", { ascending: false }),
       supabase.from("subjects").select("id,name,color"),
       supabase.from("units").select("id,name"),
       supabase.from("materials").select("id,name"),
@@ -106,6 +109,7 @@ export default function RecordsPage() {
       record_type: editing.record_type,
       common_test_year: editing.record_type === "common_test" ? editing.common_test_year : null,
       common_test_section: editing.record_type === "common_test" ? editing.common_test_section : null,
+      memo: editing.memo?.trim() || null,
     }).eq("id", editing.id);
     if (updateError) setError(updateError.message);
     else {
@@ -121,6 +125,25 @@ export default function RecordsPage() {
     const { error: deleteError } = await supabase.from("study_sessions").delete().eq("id", session.id);
     if (deleteError) setError(deleteError.message);
     else setSessions((current) => current.filter((item) => item.id !== session.id));
+  };
+
+  const uploadPhoto = async (files: FileList | null) => {
+    if (!files?.length || !photoSession) return;
+    setUploading(true);
+    setError(null);
+    try {
+      for (const file of Array.from(files)) {
+        const ext = file.name.split(".").pop() || "jpg";
+        const path = `${photoSession.id}/${Date.now()}-${crypto.randomUUID()}.${ext}`;
+        const { error: storageError } = await supabase.storage.from("photos").upload(path, file);
+        if (storageError) throw storageError;
+        const { error: rowError } = await supabase.from("photos").insert({ session_id: photoSession.id, storage_path: path, kind: "exercise", status: "pending" });
+        if (rowError) throw rowError;
+      }
+      setPhotoSession(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "写真のアップロードに失敗しました。");
+    } finally { setUploading(false); }
   };
 
   if (loading) return <Box sx={{ p: 4, textAlign: "center" }}><CircularProgress /></Box>;
@@ -139,21 +162,20 @@ export default function RecordsPage() {
         </Stack>
         <Paper variant="outlined" sx={{ p: 2 }}>
           <Typography fontWeight={700} sx={{ mb: 1 }}>科目の比率</Typography>
-          {bySubject.length === 0 ? <Typography variant="body2">記録がありません</Typography> : bySubject.map((subject) => (
-            <Box key={subject.id} sx={{ mb: 1 }}>
-              <Stack direction="row" justifyContent="space-between"><Typography variant="body2">{subject.name}</Typography><Typography variant="body2">{subject.minutes}分</Typography></Stack>
-              <LinearProgress variant="determinate" value={total ? subject.minutes / total * 100 : 0} sx={{ height: 8, borderRadius: 4, "& .MuiLinearProgress-bar": { backgroundColor: subject.color } }} />
-            </Box>
-          ))}
+          {bySubject.length === 0 ? <Typography variant="body2">記録がありません</Typography> : <Stack direction="row" spacing={2} alignItems="center">
+            <Box aria-label="科目の学習時間比率" sx={{ width: 150, height: 150, flex: "0 0 auto", borderRadius: "50%", background: `conic-gradient(${bySubject.map((subject, index) => `${subject.color ?? "#777"} ${bySubject.slice(0, index).reduce((sum, item) => sum + item.minutes / total * 100, 0)}% ${bySubject.slice(0, index + 1).reduce((sum, item) => sum + item.minutes / total * 100, 0)}%`).join(", ")})` }} />
+            <Stack spacing={0.5} sx={{ minWidth: 0 }}>{bySubject.map((subject) => <Stack key={subject.id} direction="row" spacing={0.75} alignItems="center"><Box sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: subject.color ?? "#777" }} /><Typography variant="caption">{subject.name} {Math.round(subject.minutes / total * 100)}%（{subject.minutes}分）</Typography></Stack>)}</Stack>
+          </Stack>}
         </Paper>
         <Paper variant="outlined" sx={{ p: 2 }}>
           <Typography fontWeight={700} sx={{ mb: 1 }}>学習記録</Typography>
           <Stack spacing={1.5}>
             {visibleSessions.map((session) => (
               <Box key={session.id}>
-                <Stack direction="row" justifyContent="space-between" alignItems="center"><Typography variant="body2" fontWeight={700}>{nameOf(subjects, session.subject_id)} ・ {commonTestLabel(session)}</Typography><Stack direction="row" alignItems="center"><Typography variant="body2">{session.minutes}分</Typography><IconButton aria-label="記録を編集" size="small" onClick={() => setEditing(session)}><EditIcon fontSize="small" /></IconButton><IconButton aria-label="記録を削除" size="small" color="error" onClick={() => deleteSession(session)}><DeleteIcon fontSize="small" /></IconButton></Stack></Stack>
+                <Stack direction="row" justifyContent="space-between" alignItems="center"><Typography variant="body2" fontWeight={700}>{nameOf(subjects, session.subject_id)} ・ {commonTestLabel(session)}</Typography><Stack direction="row" alignItems="center"><Typography variant="body2">{session.minutes}分</Typography><IconButton aria-label="写真を追加" size="small" onClick={() => setPhotoSession(session)}><PhotoCameraIcon fontSize="small" /></IconButton><IconButton aria-label="記録を編集" size="small" onClick={() => setEditing(session)}><EditIcon fontSize="small" /></IconButton><IconButton aria-label="記録を削除" size="small" color="error" onClick={() => deleteSession(session)}><DeleteIcon fontSize="small" /></IconButton></Stack></Stack>
                 <Typography variant="caption" color="text.secondary">{session.study_date} ・ {RECORD_TYPE_LABELS[session.record_type]}{nameOf(materials, session.material_id) ? ` ・ ${nameOf(materials, session.material_id)}` : ""}</Typography>
                 {session.understanding && <Chip size="small" label={UNDERSTANDING_LABELS[session.understanding]} sx={{ ml: 1 }} />}
+                {session.memo && <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, whiteSpace: "pre-wrap" }}>メモ: {session.memo}</Typography>}
               </Box>
             ))}
           </Stack>
@@ -168,9 +190,11 @@ export default function RecordsPage() {
           {editing.record_type === "common_test" ? <Stack direction="row" spacing={1}><TextField label="年度" type="number" value={editing.common_test_year ?? ""} onChange={(event) => setEditing({ ...editing, common_test_year: Number(event.target.value) || null })} fullWidth /><TextField select label="大問" value={editing.common_test_section ?? "年度通し"} onChange={(event) => setEditing({ ...editing, common_test_section: event.target.value })} fullWidth>{COMMON_TEST_SECTIONS.map((section) => <MenuItem key={section} value={section}>{section}</MenuItem>)}</TextField></Stack> : <TextField select label="単元" value={editing.unit_id ?? ""} onChange={(event) => setEditing({ ...editing, unit_id: event.target.value || null })} fullWidth><MenuItem value="">未指定</MenuItem>{units.filter((unit) => unit.subject_id === editing.subject_id).map((unit) => <MenuItem key={unit.id} value={unit.id}>{unit.name}</MenuItem>)}</TextField>}
           <TextField select label="教材" value={editing.material_id ?? ""} onChange={(event) => setEditing({ ...editing, material_id: event.target.value || null })} fullWidth><MenuItem value="">未指定</MenuItem>{materials.map((material) => <MenuItem key={material.id} value={material.id}>{material.name}</MenuItem>)}</TextField>
           <TextField select label="理解度" value={editing.understanding ?? ""} onChange={(event) => setEditing({ ...editing, understanding: (event.target.value || null) as Understanding | null })} fullWidth><MenuItem value="">未指定</MenuItem>{Object.entries(UNDERSTANDING_LABELS).map(([value, label]) => <MenuItem key={value} value={value}>{label}</MenuItem>)}</TextField>
+          <TextField label="コメント・メモ" value={editing.memo ?? ""} onChange={(event) => setEditing({ ...editing, memo: event.target.value })} multiline minRows={2} fullWidth />
         </Stack>}</DialogContent>
         <DialogActions><Button onClick={() => setEditing(null)} disabled={saving}>キャンセル</Button><Button variant="contained" onClick={saveEdit} disabled={saving}>{saving ? "保存中..." : "保存"}</Button></DialogActions>
       </Dialog>
+      <Dialog open={!!photoSession} onClose={() => !uploading && setPhotoSession(null)} fullWidth maxWidth="xs"><DialogTitle>あとから写真を追加</DialogTitle><DialogContent><Typography variant="body2">{photoSession?.study_date}の記録に、丸付け済みの写真を追加します。</Typography></DialogContent><DialogActions><Button onClick={() => setPhotoSession(null)} disabled={uploading}>キャンセル</Button><Button component="label" variant="contained" disabled={uploading}>{uploading ? "アップロード中..." : "写真を選ぶ"}<input hidden multiple accept="image/*" type="file" onChange={(event) => uploadPhoto(event.target.files)} /></Button></DialogActions></Dialog>
     </Box>
   );
 }

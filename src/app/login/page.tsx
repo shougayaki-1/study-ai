@@ -41,13 +41,14 @@ export default function LoginPage() {
     <Box
       sx={{
         minHeight: "100dvh",
+        minWidth: "100%",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
         p: 3,
       }}
     >
-      <Stack spacing={3} sx={{ width: "100%", maxWidth: 360 }}>
+      <Stack spacing={3} sx={{ width: "100%", maxWidth: 360, mx: "auto" }}>
         <Typography variant="h5" fontWeight={700} textAlign="center">
           Study AI
         </Typography>
