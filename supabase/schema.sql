@@ -249,6 +249,64 @@ create table if not exists mock_exam_scores (
   created_at timestamptz not null default now()
 );
 
+-- 科目ごとの記録入力プロファイル。知識系科目は設定画面でON/OFFできる。
+alter table subjects add column if not exists input_profile text not null default 'range';
+alter table subjects drop constraint if exists subjects_input_profile_check;
+alter table subjects add constraint subjects_input_profile_check
+  check (input_profile in ('range', 'knowledge_tag', 'none'));
+alter table subjects add column if not exists columns_enabled boolean not null default false;
+
+-- 勉強記録に具体的な学習範囲・知識トピックを追加
+alter table study_sessions add column if not exists range_text text;
+alter table study_sessions add column if not exists topic_tag text;
+
+-- 知識タグのチップ選択用マスタ(自由入力を避け、既出タグから選ばせる)
+create table if not exists topic_tags (
+  id uuid primary key default gen_random_uuid(),
+  subject_id uuid not null references subjects(id) on delete cascade,
+  name text not null,
+  usage_count integer not null default 0,
+  created_at timestamptz not null default now(),
+  unique(subject_id, name)
+);
+create index if not exists idx_topic_tags_subject_id on topic_tags(subject_id);
+
+-- AI生成の知識補強コラム(地理・政経など知識系科目向け)
+create table if not exists knowledge_columns (
+  id uuid primary key default gen_random_uuid(),
+  subject_id uuid not null references subjects(id) on delete cascade,
+  unit_id uuid references units(id) on delete set null,
+  topic_tag text,
+  title text not null,
+  body_md text not null,
+  trigger_reason text,
+  weakness_score_at_generation numeric,
+  read_at timestamptz,
+  analysis_run_id uuid references analysis_runs(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_knowledge_columns_subject_id on knowledge_columns(subject_id);
+create index if not exists idx_knowledge_columns_created_at on knowledge_columns(created_at desc);
+
+-- 学習時間割(何時から何時まで勉強するかの計画)。締切管理の events とは別概念。
+create table if not exists plan_blocks (
+  id uuid primary key default gen_random_uuid(),
+  plan_date date not null,
+  start_time time not null,
+  end_time time not null,
+  subject_id uuid references subjects(id) on delete set null,
+  unit_id uuid references units(id) on delete set null,
+  memo text,
+  recurrence_rule text,
+  source_plan_id uuid references plan_blocks(id) on delete set null,
+  status text not null default 'planned' check (status in ('planned', 'done', 'skipped')),
+  linked_session_batch_id uuid,
+  created_at timestamptz not null default now()
+);
+alter table plan_blocks drop constraint if exists plan_blocks_time_order_check;
+alter table plan_blocks add constraint plan_blocks_time_order_check check (end_time > start_time);
+create index if not exists idx_plan_blocks_plan_date on plan_blocks(plan_date);
+
 alter table reports add column if not exists analysis_run_id uuid references analysis_runs(id) on delete set null;
 alter table photos add column if not exists confidence numeric check (confidence is null or (confidence >= 0 and confidence <= 1));
 alter table photos add column if not exists needs_review boolean not null default false;
@@ -318,6 +376,7 @@ create index if not exists idx_mock_exam_scores_subject_id on mock_exam_scores(s
 create index if not exists idx_mock_exam_scores_mock_exam_id on mock_exam_scores(mock_exam_id);
 create index if not exists idx_mock_exams_taken_date on mock_exams(taken_date desc);
 create index if not exists idx_question_results_mock_exam_id on question_results(mock_exam_id);
+create index if not exists idx_review_tasks_completed_at on review_tasks(completed_at desc);
 
 -- ============================================================
 -- RLS: 認証済みユーザー(本人)のみ読み書き可
@@ -343,6 +402,9 @@ alter table event_subjects enable row level security;
 alter table event_units enable row level security;
 alter table mock_exams enable row level security;
 alter table mock_exam_scores enable row level security;
+alter table topic_tags enable row level security;
+alter table knowledge_columns enable row level security;
+alter table plan_blocks enable row level security;
 
 do $$
 declare
@@ -354,7 +416,8 @@ begin
       'question_results', 'essay_reviews', 'weakness_scores',
       'review_tasks', 'events', 'reports', 'push_subscriptions',
       'material_units', 'unit_state_snapshots', 'weekly_plans', 'analysis_runs',
-      'event_subjects', 'event_units', 'mock_exams', 'mock_exam_scores'
+      'event_subjects', 'event_units', 'mock_exams', 'mock_exam_scores',
+      'topic_tags', 'knowledge_columns', 'plan_blocks'
     ])
   loop
     execute format(

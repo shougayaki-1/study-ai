@@ -4,11 +4,11 @@ import { restClient, printJson } from './lib.mjs';
 
 const db = restClient();
 const [subjects, units, materials, materialUnits, sessions, results, tasks, events, eventSubjects, eventUnits, weeklyPlans] = await Promise.all([
-  db.select('subjects', 'select=id,name,is_target&order=sort_order'),
+  db.select('subjects', 'select=id,name,is_target,input_profile,columns_enabled&order=sort_order'),
   db.select('units', 'select=id,subject_id,name,is_target&order=sort_order'),
   db.select('materials', 'select=id,subject_id,name,kind,difficulty'),
   db.select('material_units', 'select=material_id,unit_id'),
-  db.select('study_sessions', 'select=id,unit_id,subject_id,material_id,minutes,study_date,understanding,created_at&order=created_at.desc'),
+  db.select('study_sessions', 'select=id,unit_id,subject_id,material_id,minutes,study_date,understanding,range_text,topic_tag,created_at&order=created_at.desc'),
   db.select('question_results', 'select=id,unit_id,is_correct,error_type,confidence,created_at&unit_id=not.is.null&order=created_at.desc'),
   db.select('review_tasks', 'select=id,unit_id,due_date,status,completed_at,priority_score,source_kind,evidence_json&order=created_at.desc'),
   db.select('events', 'select=id,title,kind,due_date,done&done=eq.false&order=due_date.asc'),
@@ -45,7 +45,10 @@ for (const unit of units.filter((row) => row.is_target && subjectById.get(row.su
     return acc;
   }, {});
   const compatibleMaterials = materialUnits.filter((link) => link.unit_id === unit.id).map((link) => materialById.get(link.material_id)).filter(Boolean);
-  const evidence = { attempts: unitResults.length, sessionCount: unitSessions.length, recent30Accuracy: accuracy, recent10Accuracy: recentAccuracy, improving: accuracy != null && recentAccuracy != null && recentAccuracy >= accuracy + 0.1, elapsedDays, errors, previousTasks: tasks.filter((task) => task.unit_id === unit.id).slice(0, 10), materials: compatibleMaterials };
+  // 直近の学習範囲・知識トピックの履歴(次の範囲の提案・弱点トピックの特定に使う)
+  const rangeHistory = unitSessions.filter((row) => row.range_text).slice(0, 5).map((row) => row.range_text);
+  const topicTagHistory = unitSessions.filter((row) => row.topic_tag).slice(0, 5).map((row) => row.topic_tag);
+  const evidence = { attempts: unitResults.length, sessionCount: unitSessions.length, recent30Accuracy: accuracy, recent10Accuracy: recentAccuracy, improving: accuracy != null && recentAccuracy != null && recentAccuracy >= accuracy + 0.1, elapsedDays, errors, previousTasks: tasks.filter((task) => task.unit_id === unit.id).slice(0, 10), materials: compatibleMaterials, rangeHistory, topicTagHistory };
   stateRows.push({ unit_id: unit.id, snapshot_date: today, state, weakness_score: Math.round(weaknessScore * 1000) / 1000, accuracy: accuracy == null ? null : Math.round(accuracy * 1000) / 1000, understanding: currentUnderstanding, last_studied_at: lastDate, evidence_json: evidence, unit_name: unit.name, subject_name: subjectById.get(unit.subject_id)?.name });
 }
 
@@ -69,4 +72,4 @@ const nextWeekStart = nextWeek.toISOString().slice(0, 10);
 const existingPlan = weeklyPlans.find((row) => row.week_start === nextWeekStart);
 await db.upsert('weekly_plans', [{ week_start: nextWeekStart, estimated_minutes: estimatedWeeklyMinutes, adjusted_minutes: existingPlan?.adjusted_minutes ?? null, updated_at: now.toISOString() }], 'week_start');
 const effectiveWeeklyMinutes = existingPlan?.adjusted_minutes ?? estimatedWeeklyMinutes;
-printJson({ generatedAt: now.toISOString(), stateRows, estimatedWeeklyMinutes, effectiveWeeklyMinutes, upcomingEvents: events.map((event) => ({ ...event, subjectIds: eventSubjects.filter((row) => row.event_id === event.id).map((row) => row.subject_id), unitIds: eventUnits.filter((row) => row.event_id === event.id).map((row) => row.unit_id) })) });
+printJson({ generatedAt: now.toISOString(), stateRows, estimatedWeeklyMinutes, effectiveWeeklyMinutes, subjects, upcomingEvents: events.map((event) => ({ ...event, subjectIds: eventSubjects.filter((row) => row.event_id === event.id).map((row) => row.subject_id), unitIds: eventUnits.filter((row) => row.event_id === event.id).map((row) => row.unit_id) })) });

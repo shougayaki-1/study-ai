@@ -19,6 +19,12 @@ const sessions = await db.select(
   'study_sessions',
   'select=unit_id,started_at&unit_id=not.is.null&order=started_at.desc'
 );
+// 完了済みの復習提案も「学習した」信号として扱う(正誤データが伴わない自己申告でも
+// 忘却スコアをリセットしてよい、という運用方針による)。
+const completedTasks = await db.select(
+  'review_tasks',
+  'select=unit_id,completed_at&status=eq.completed&completed_at=not.is.null&order=completed_at.desc'
+);
 
 const now = Date.now();
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -30,20 +36,18 @@ for (const r of results) {
   byUnitResults.set(r.unit_id, list);
 }
 
+// 「最終学習日」は study_sessions / question_results / 完了済み review_tasks の
+// 3つの信号のうち最も新しいものを採用する(復習タスク完了は正誤データが無くても
+// 忘却の時計をリセットしてよい、という運用方針による)。
 const lastStudiedByUnit = new Map();
-for (const s of sessions) {
-  if (!lastStudiedByUnit.has(s.unit_id)) {
-    lastStudiedByUnit.set(s.unit_id, s.started_at); // 降順なので最初のヒットが最新
-  }
-}
-// question_results側の最新created_atも「最終学習日」の代替として考慮する
-for (const r of results) {
-  const cur = lastStudiedByUnit.get(r.unit_id);
-  if (!cur || new Date(r.created_at) > new Date(cur)) {
-    // sessionsの日付のほうが優先だが、無ければquestion_resultsを使う
-    if (!cur) lastStudiedByUnit.set(r.unit_id, r.created_at);
-  }
-}
+const considerSignal = (unitId, timestamp) => {
+  if (!unitId || !timestamp) return;
+  const cur = lastStudiedByUnit.get(unitId);
+  if (!cur || new Date(timestamp) > new Date(cur)) lastStudiedByUnit.set(unitId, timestamp);
+};
+for (const s of sessions) considerSignal(s.unit_id, s.started_at);
+for (const r of results) considerSignal(r.unit_id, r.created_at);
+for (const t of completedTasks) considerSignal(t.unit_id, t.completed_at);
 
 const rows = [];
 for (const unit of units) {

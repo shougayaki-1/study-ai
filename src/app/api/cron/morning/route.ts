@@ -37,7 +37,7 @@ export async function GET(request: NextRequest) {
   const today = todayStr();
   const upcoming = addDays(today, 7);
 
-  const [eventsRes, reviewTasksRes, subsRes] = await Promise.all([
+  const [eventsRes, reviewTasksRes, planBlocksRes, subsRes] = await Promise.all([
     supabase
       .from("events")
       .select("id, title, due_date, kind")
@@ -52,14 +52,20 @@ export async function GET(request: NextRequest) {
       .eq("done", false)
       .eq("status", "pending")
       .order("created_at", { ascending: true }),
+    supabase
+      .from("plan_blocks")
+      .select("id, start_time, end_time, subject_id")
+      .eq("plan_date", today)
+      .is("recurrence_rule", null)
+      .order("start_time", { ascending: true }),
     supabase.from("push_subscriptions").select("id, endpoint, keys_json"),
   ]);
 
-  if (eventsRes.error || reviewTasksRes.error || subsRes.error) {
+  if (eventsRes.error || reviewTasksRes.error || planBlocksRes.error || subsRes.error) {
     return NextResponse.json(
       {
         error: "supabase query failed",
-        details: eventsRes.error?.message ?? reviewTasksRes.error?.message ?? subsRes.error?.message,
+        details: eventsRes.error?.message ?? reviewTasksRes.error?.message ?? planBlocksRes.error?.message ?? subsRes.error?.message,
       },
       { status: 500 },
     );
@@ -67,6 +73,7 @@ export async function GET(request: NextRequest) {
 
   const events = eventsRes.data ?? [];
   const reviewTasks = reviewTasksRes.data ?? [];
+  const planBlocks = planBlocksRes.data ?? [];
   const subscriptions = (subsRes.data ?? []) as PushSubscriptionRow[];
 
   const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
@@ -77,13 +84,14 @@ export async function GET(request: NextRequest) {
       warning: "VAPID keys not configured, skipped push send (Supabase keep-alive query still executed)",
       events: events.length,
       reviewTasks: reviewTasks.length,
+      planBlocks: planBlocks.length,
     });
   }
 
   webpush.setVapidDetails("mailto:example@example.com", vapidPublicKey, vapidPrivateKey);
 
   if (subscriptions.length === 0) {
-    return NextResponse.json({ sent: 0, events: events.length, reviewTasks: reviewTasks.length });
+    return NextResponse.json({ sent: 0, events: events.length, reviewTasks: reviewTasks.length, planBlocks: planBlocks.length });
   }
 
   const bodyLines: string[] = [];
@@ -92,6 +100,10 @@ export async function GET(request: NextRequest) {
   }
   if (reviewTasks.length > 0) {
     bodyLines.push(`今日の復習提案: ${reviewTasks.length}件(${reviewTasks[0].reason ?? reviewTasks[0].range_text ?? ""})`);
+  }
+  if (planBlocks.length > 0) {
+    const first = planBlocks[0];
+    bodyLines.push(`今日の時間割: ${planBlocks.length}件(${first.start_time.slice(0, 5)}〜 他)`);
   }
   if (bodyLines.length === 0) {
     bodyLines.push("今日の予定・復習提案はありません");
@@ -135,5 +147,6 @@ export async function GET(request: NextRequest) {
     removed: staleIds.length,
     events: events.length,
     reviewTasks: reviewTasks.length,
+    planBlocks: planBlocks.length,
   });
 }

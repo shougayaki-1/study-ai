@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
@@ -12,6 +13,7 @@ import MenuItem from "@mui/material/MenuItem";
 import ToggleButton from "@mui/material/ToggleButton";
 import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
 import Alert from "@mui/material/Alert";
+import Chip from "@mui/material/Chip";
 import CircularProgress from "@mui/material/CircularProgress";
 import AddIcon from "@mui/icons-material/Add";
 import DeleteIcon from "@mui/icons-material/Delete";
@@ -27,9 +29,10 @@ import {
 
 export const dynamic = "force-dynamic";
 
-type Subject = { id: string; name: string; color: string; sort_order: number };
+type Subject = { id: string; name: string; color: string; sort_order: number; input_profile: string };
 type Unit = { id: string; subject_id: string; name: string; sort_order: number };
 type Material = { id: string; subject_id: string; name: string; difficulty: string };
+type TopicTag = { id: string; subject_id: string; name: string; usage_count: number };
 type Entry = {
   key: string;
   subjectId: string;
@@ -42,8 +45,15 @@ type Entry = {
   commonTestSection: string;
   commonTestMode: "by_year" | "by_section";
   memo: string;
+  rangeText: string;
+  topicTag: string;
 };
-type PreviousSession = { unit_id: string | null; understanding: Understanding | null };
+type PreviousSession = {
+  unit_id: string | null;
+  understanding: Understanding | null;
+  material_id: string | null;
+  range_text: string | null;
+};
 type SavedSummary = {
   total: number;
   bySubject: Array<{ name: string; minutes: number }>;
@@ -76,16 +86,29 @@ function newEntry(subjectId = ""): Entry {
     commonTestSection: "大問1",
     commonTestMode: "by_year",
     memo: "",
+    rangeText: "",
+    topicTag: "",
   };
 }
 
 export default function RecordPage() {
+  return (
+    <Suspense fallback={<Box sx={{ p: 4, textAlign: "center" }}><CircularProgress /></Box>}>
+      <RecordPageInner />
+    </Suspense>
+  );
+}
+
+function RecordPageInner() {
   const supabase = createClient();
+  const searchParams = useSearchParams();
+  const planBlockId = searchParams.get("planBlockId");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(true);
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
   const [materials, setMaterials] = useState<Material[]>([]);
+  const [topicTags, setTopicTags] = useState<TopicTag[]>([]);
   const [previous, setPrevious] = useState<PreviousSession[]>([]);
   const [studyDate, setStudyDate] = useState(todayString());
   const [entries, setEntries] = useState<Entry[]>([newEntry()]);
@@ -98,29 +121,44 @@ export default function RecordPage() {
   useEffect(() => {
     let active = true;
     Promise.all([
-      supabase.from("subjects").select("id,name,color,sort_order").order("sort_order"),
+      supabase.from("subjects").select("id,name,color,sort_order,input_profile").order("sort_order"),
       supabase.from("units").select("id,subject_id,name,sort_order").order("sort_order"),
       supabase.from("materials").select("id,subject_id,name,difficulty").order("name"),
+      supabase.from("topic_tags").select("id,subject_id,name,usage_count").order("usage_count", { ascending: false }),
       supabase
         .from("study_sessions")
-        .select("unit_id,understanding,subject_id,material_id,created_at")
+        .select("unit_id,understanding,subject_id,material_id,range_text,created_at")
         .order("created_at", { ascending: false })
         .limit(200),
-    ]).then(([s, u, m, h]) => {
+    ]).then(([s, u, m, t, h]) => {
       if (!active) return;
-      const firstError = s.error ?? u.error ?? m.error ?? h.error;
+      const firstError = s.error ?? u.error ?? m.error ?? t.error ?? h.error;
       if (firstError) setError(firstError.message);
       const subjectRows = (s.data ?? []) as Subject[];
       setSubjects(subjectRows);
       setUnits((u.data ?? []) as Unit[]);
       setMaterials((m.data ?? []) as Material[]);
+      setTopicTags((t.data ?? []) as TopicTag[]);
       setPrevious((h.data ?? []) as PreviousSession[]);
       const last = (h.data?.[0] ?? null) as { subject_id?: string; material_id?: string; unit_id?: string } | null;
-      setEntries([{
-        ...newEntry(last?.subject_id ?? subjectRows[0]?.id ?? ""),
-        unitId: last?.unit_id ?? "",
-        materialId: last?.material_id ?? "",
-      }]);
+      if (planBlockId) {
+        const planSubjectId = searchParams.get("subjectId") || "";
+        const planUnitId = searchParams.get("unitId") || "";
+        const planMinutes = Number(searchParams.get("minutes") || 60);
+        const planStudyDate = searchParams.get("studyDate");
+        setEntries([{
+          ...newEntry(planSubjectId || subjectRows[0]?.id || ""),
+          unitId: planUnitId,
+          minutes: planMinutes,
+        }]);
+        if (planStudyDate) setStudyDate(planStudyDate);
+      } else {
+        setEntries([{
+          ...newEntry(last?.subject_id ?? subjectRows[0]?.id ?? ""),
+          unitId: last?.unit_id ?? "",
+          materialId: last?.material_id ?? "",
+        }]);
+      }
       setLoading(false);
     });
     return () => { active = false; };
@@ -135,8 +173,30 @@ export default function RecordPage() {
     return map;
   }, [previous]);
 
+  const previousRangeByUnitMaterial = useMemo(() => {
+    const map = new Map<string, string>();
+    previous.forEach((row) => {
+      if (!row.unit_id || !row.range_text) return;
+      const key = `${row.unit_id}:${row.material_id ?? ""}`;
+      if (!map.has(key)) map.set(key, row.range_text);
+    });
+    return map;
+  }, [previous]);
+
   const updateEntry = (key: string, patch: Partial<Entry>) => {
     setEntries((current) => current.map((entry) => entry.key === key ? { ...entry, ...patch } : entry));
+  };
+
+  const selectUnitOrMaterial = (entryKey: string, patch: Partial<Entry>) => {
+    setEntries((current) => current.map((entry) => {
+      if (entry.key !== entryKey) return entry;
+      const updated = { ...entry, ...patch };
+      if (!updated.rangeText) {
+        const suggestion = previousRangeByUnitMaterial.get(`${updated.unitId}:${updated.materialId}`);
+        if (suggestion) updated.rangeText = suggestion;
+      }
+      return updated;
+    }));
   };
 
   const saveAll = async () => {
@@ -158,6 +218,8 @@ export default function RecordPage() {
       common_test_section: entry.recordType === "common_test" && entry.commonTestMode === "by_section" ? entry.commonTestSection : null,
       understanding: entry.understanding,
       memo: entry.memo.trim() || null,
+      range_text: entry.rangeText.trim() || null,
+      topic_tag: entry.topicTag.trim() || null,
       batch_id: batchId,
     }));
     const { data, error: insertError } = await supabase
@@ -168,6 +230,25 @@ export default function RecordPage() {
       setError(insertError.message);
       setSaving(false);
       return;
+    }
+
+    const usedTags = new Map<string, string>();
+    entries.forEach((entry) => {
+      const name = entry.topicTag.trim();
+      if (name) usedTags.set(`${entry.subjectId}:${name}`, name);
+    });
+    for (const [key, name] of usedTags) {
+      const subjectId = key.split(":")[0];
+      const existing = topicTags.find((tag) => tag.subject_id === subjectId && tag.name === name);
+      if (existing) {
+        await supabase.from("topic_tags").update({ usage_count: existing.usage_count + 1 }).eq("id", existing.id);
+      } else {
+        await supabase.from("topic_tags").insert({ subject_id: subjectId, name, usage_count: 1 });
+      }
+    }
+
+    if (planBlockId) {
+      await supabase.from("plan_blocks").update({ status: "done", linked_session_batch_id: batchId }).eq("id", planBlockId);
     }
 
     const bySubject = new Map<string, number>();
@@ -305,15 +386,60 @@ export default function RecordPage() {
                     </TextField>}
                   </Stack>
                 ) : (
-                  <Stack direction="row" spacing={1}>
-                    <TextField select label="単元" value={entry.unitId} onChange={(event) => updateEntry(entry.key, { unitId: event.target.value })} size="small" fullWidth>
-                      <MenuItem value="">未指定</MenuItem>
-                      {filteredUnits.map((unit) => <MenuItem key={unit.id} value={unit.id}>{unit.name}</MenuItem>)}
-                    </TextField>
-                    <TextField select label="教材" value={entry.materialId} onChange={(event) => updateEntry(entry.key, { materialId: event.target.value })} size="small" fullWidth>
-                      <MenuItem value="">未指定</MenuItem>
-                      {filteredMaterials.map((material) => <MenuItem key={material.id} value={material.id}>{material.name}・{DIFFICULTY_LABELS[material.difficulty]}</MenuItem>)}
-                    </TextField>
+                  <Stack spacing={1.5}>
+                    <Stack direction="row" spacing={1}>
+                      <TextField select label="単元" value={entry.unitId} onChange={(event) => selectUnitOrMaterial(entry.key, { unitId: event.target.value })} size="small" fullWidth>
+                        <MenuItem value="">未指定</MenuItem>
+                        {filteredUnits.map((unit) => <MenuItem key={unit.id} value={unit.id}>{unit.name}</MenuItem>)}
+                      </TextField>
+                      <TextField select label="教材" value={entry.materialId} onChange={(event) => selectUnitOrMaterial(entry.key, { materialId: event.target.value })} size="small" fullWidth>
+                        <MenuItem value="">未指定</MenuItem>
+                        {filteredMaterials.map((material) => <MenuItem key={material.id} value={material.id}>{material.name}・{DIFFICULTY_LABELS[material.difficulty]}</MenuItem>)}
+                      </TextField>
+                    </Stack>
+                    {(() => {
+                      const subject = subjects.find((item) => item.id === entry.subjectId);
+                      if (subject?.input_profile === "knowledge_tag") {
+                        const tags = topicTags.filter((tag) => tag.subject_id === entry.subjectId).slice(0, 8);
+                        return (
+                          <Stack spacing={0.5}>
+                            <Typography variant="caption" color="text.secondary">知識トピック（任意）</Typography>
+                            <Stack direction="row" spacing={0.5} sx={{ flexWrap: "wrap", rowGap: 0.5 }}>
+                              {tags.map((tag) => (
+                                <Chip
+                                  key={tag.id}
+                                  label={tag.name}
+                                  size="small"
+                                  color={entry.topicTag === tag.name ? "primary" : "default"}
+                                  onClick={() => updateEntry(entry.key, { topicTag: entry.topicTag === tag.name ? "" : tag.name })}
+                                />
+                              ))}
+                            </Stack>
+                            <TextField
+                              label="新しいトピックを追加（任意）"
+                              value={entry.topicTag}
+                              onChange={(event) => updateEntry(entry.key, { topicTag: event.target.value })}
+                              size="small"
+                              fullWidth
+                              placeholder="例: EU統合、価格の決定"
+                            />
+                          </Stack>
+                        );
+                      }
+                      if (subject?.input_profile === "range") {
+                        return (
+                          <TextField
+                            label="学習範囲（任意）"
+                            value={entry.rangeText}
+                            onChange={(event) => updateEntry(entry.key, { rangeText: event.target.value })}
+                            size="small"
+                            fullWidth
+                            placeholder="例: 青チャート p120-125 例題12-15"
+                          />
+                        );
+                      }
+                      return null;
+                    })()}
                   </Stack>
                 )}
                 <Stack direction="row" spacing={0.5}>{TIME_OPTIONS.map((minutes) => <Button key={minutes} size="small" fullWidth variant={entry.minutes === minutes ? "contained" : "outlined"} onClick={() => updateEntry(entry.key, { minutes })}>{minutes}</Button>)}</Stack>

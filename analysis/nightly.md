@@ -169,12 +169,18 @@ score = (1 - 直近30件の正答率) × (1 + log(1 + 経過日数) / 2)
 ```
 
 - 正答率: 単元ごとの `question_results` を作成日時降順で直近30件に絞って算出。
-- 経過日数: その単元の最終学習日(`study_sessions.started_at` の最新値。
-  記録が無ければ `question_results.created_at` の最新値)から実行時点までの日数。
-  学習記録が全く無い単元は999日として重く評価する。
+- 経過日数: その単元の最終学習日から実行時点までの日数。「最終学習日」は
+  `study_sessions.started_at` / `question_results.created_at` / **完了済み
+  `review_tasks`(`status=completed`)の `completed_at`** の3つの信号のうち最も新しいものを
+  採用する(正誤データが伴わない自己申告の復習完了でも忘却の時計をリセットしてよい、という
+  運用方針)。学習記録が全く無い単元は999日として重く評価する。
 - `weakness_scores` は全置換(既存行を削除してから再挿入)される。
 
 出力される `{ recomputed, rows }` を確認し、異常(全件score=0など)がないかざっと見る。
+
+参考: 忘却重み `1 + log(1+経過日数)/2` が暗黙に意味する目安間隔は、正答率50%の単元で
+おおよそ3〜4日ごと、正答率90%の単元で2〜3週間ごとに復習優先度が高くなる程度である
+(厳密なSM-2ではなく、この近似で十分というのがDESIGN.mdの方針)。
 
 ### 3. review_tasks の生成(3〜5件)
 
@@ -193,12 +199,42 @@ score = (1 - 直近30件の正答率) × (1 + log(1 + 経過日数) / 2)
    **具体的な範囲**(`range_text`、例:「青チャート 例題40〜43」「Vintage 単語1〜50」)を
    決める。ちょうど良い教材が無ければ `material_id` は null にし、`range_text` は
    「教科書の該当単元を復習」等、単元名から導ける具体的な指示にする。
-4. `reason` には根拠を簡潔に記す(例:「正答率52%、5日未学習」「直近3回連続で誤答」)。
+   - `historical-context.mjs` の `evidence_json.rangeHistory` にその単元の
+     `study_sessions.range_text` 履歴が入っている場合は、直前の範囲の**次の範囲**を
+     推定して `range_text` に反映する(例: 直近が「例題12-15」なら次は「例題16-19」)。
+   - `evidence_json.topicTagHistory` に知識トピック(地理・政経などの `topic_tag`)の履歴が
+     ある場合は、単元名だけでなく**弱点トピック名を具体的に**`reason`/`range_text` に含める
+     (例:「地理: EU統合の理解が弱い」)。
+4. `reason` には根拠を簡潔に記す。**間隔ベースの言い回し**を使うこと
+   (例:「前回復習から6日、目安は5日周期」「正答率52%、5日未学習」「直近3回連続で誤答」)。
    `estimated_minutes`、`priority_score`、`source_kind`
    (`weakness`/`retention`/`diagnostic`) と数値根拠の `evidence_json` も必ず保存する。
    提案時間の合計は週間学習可能時間を超えないようにする。
 5. `due_date` は翌日の日付(YYYY-MM-DD)を指定する。
 6. `node analysis/helpers/insert-review-tasks.mjs '<JSON配列>'` で `review_tasks` に挿入する。
+
+### 3b. 知識系科目のコラム生成
+
+地理・政経など、設定画面で「知識コラム生成」がONになっている科目
+(`historical-context.mjs` の出力 `subjects` のうち `columns_enabled=true`)を対象に、
+弱点補強コラムを生成する。
+
+1. `node analysis/helpers/list-recent-columns.mjs 14` で直近14日以内に生成済みの
+   コラム(単元・トピック)を取得し、重複生成を避ける。
+2. `columns_enabled=true` の科目のうち、`weakness_scores`(または手順0の
+   `stateRows`)でスコアが高く、かつ直近14日以内に同一単元/トピックのコラムが
+   未生成のものから、**1晩あたり最大1〜2件**を選ぶ(復習提案と同程度の負荷に抑える)。
+   対象が無ければこのステップはスキップしてよい。
+3. 各コラムは、`historical-context.mjs` の `evidence_json`(誤答タイプの内訳
+   `errors.knowledge` や `topicTagHistory` など)を根拠に、**300〜600字程度**で
+   具体的な弱点を補強する解説を書く。単元名だけでなく、`topicTagHistory` があれば
+   その具体的なトピックを扱う。
+4. `node analysis/helpers/insert-knowledge-column.mjs '<JSONオブジェクト>'` で
+   `knowledge_columns` に挿入する。形式:
+   ```json
+   {"subject_id": "...", "unit_id": "...", "topic_tag": "EU統合", "title": "EU統合の歴史と仕組み", "body_md": "...", "trigger_reason": "正答率38%が3週間継続", "weakness_score_at_generation": 1.2, "analysis_run_id": "<手順0で保持したid>"}
+   ```
+5. 生成したコラムのタイトル一覧は、手順4の日次レポートに「今日のコラム」として記載する。
 
 ### 4. 日次レポート(日曜は週次総括も)
 
@@ -212,6 +248,7 @@ score = (1 - 直近30件の正答率) × (1 + log(1 + 経過日数) / 2)
    - 模試を取り込んだ日は、模試名・総合得点/偏差値・科目別偏差値・志望判定(A〜E/Z)の要約
    - 判読不能だった写真の件数と再撮影のお願い(該当する場合)
    - 明日の復習提案(手順3で生成した内容)の要約
+   - 今日生成した知識コラム(手順3bで生成した内容)があればタイトルを列挙
 4. 作成したMarkdownを一時ファイル(例: `analysis/tmp/daily-report.md`)に書き出し、
    `node analysis/helpers/insert-report.mjs daily analysis/tmp/daily-report.md <analysis_run_id>` で
    `reports` (`kind=daily`) に保存する。
@@ -232,6 +269,7 @@ score = (1 - 直近30件の正答率) × (1 + log(1 + 経過日数) / 2)
 - 処理したpending写真の件数(analyzed / failed 内訳)
 - 再計算したweakness_scoresの件数
 - 生成したreview_tasksの件数と単元名
+- 生成したknowledge_columnsの件数とタイトル(0件ならその旨)
 - 保存したreportsの種類(daily / daily+weekly)
 
 ---

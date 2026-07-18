@@ -33,7 +33,15 @@ import { isPushSupported, urlBase64ToUint8Array } from "@/lib/push";
 
 export const dynamic = "force-dynamic";
 
-type Subject = { id: string; name: string; color: string; sort_order: number; is_target: boolean };
+type Subject = {
+  id: string;
+  name: string;
+  color: string;
+  sort_order: number;
+  is_target: boolean;
+  input_profile: string;
+  columns_enabled: boolean;
+};
 type Unit = { id: string; subject_id: string; name: string; sort_order: number; is_target: boolean };
 type Material = { id: string; subject_id: string; name: string; kind: string; difficulty: string };
 const DIFFICULTIES = [["basic", "基礎"], ["standard", "標準"], ["advanced", "応用"]] as const;
@@ -65,7 +73,7 @@ export default function SettingsPage() {
   const loadAll = async () => {
     try {
       const [subjectsRes, unitsRes, materialsRes, materialUnitsRes] = await Promise.all([
-        supabase.from("subjects").select("id, name, color, sort_order, is_target").order("sort_order"),
+        supabase.from("subjects").select("id, name, color, sort_order, is_target, input_profile, columns_enabled").order("sort_order"),
         supabase.from("units").select("id, subject_id, name, sort_order, is_target").order("sort_order"),
         supabase.from("materials").select("id, subject_id, name, kind, difficulty").order("name"),
         supabase.from("material_units").select("material_id,unit_id"),
@@ -239,6 +247,19 @@ export default function SettingsPage() {
     if (error) await loadAll();
   };
 
+  const setKnowledgeTagProfile = async (subjectId: string, enabled: boolean) => {
+    const profile = enabled ? "knowledge_tag" : "range";
+    setSubjects((rows) => rows.map((row) => row.id === subjectId ? { ...row, input_profile: profile } : row));
+    const { error } = await supabase.from("subjects").update({ input_profile: profile }).eq("id", subjectId);
+    if (error) await loadAll();
+  };
+
+  const setColumnsEnabled = async (subjectId: string, enabled: boolean) => {
+    setSubjects((rows) => rows.map((row) => row.id === subjectId ? { ...row, columns_enabled: enabled } : row));
+    const { error } = await supabase.from("subjects").update({ columns_enabled: enabled }).eq("id", subjectId);
+    if (error) await loadAll();
+  };
+
   const setDifficulty = async (material: Material, difficulty: string) => {
     setMaterials((rows) => rows.map((row) => row.id === material.id ? { ...row, difficulty } : row));
     const { error } = await supabase.from("materials").update({ difficulty }).eq("id", material.id);
@@ -345,12 +366,34 @@ export default function SettingsPage() {
           </FormControl>
           <Button startIcon={<AddIcon />} size="small" sx={{ mb: 1.5 }} onClick={() => openAddDialog("subject")}>科目を追加</Button>
           {subjects.find((subject) => subject.id === selectedSubjectId) && (
-            <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
-              <Typography variant="body2">この科目を受験・学習対象にする</Typography>
-              <Switch
-                checked={subjects.find((subject) => subject.id === selectedSubjectId)?.is_target ?? false}
-                onChange={(event) => setTarget("subjects", selectedSubjectId, event.target.checked)}
-              />
+            <Stack spacing={0.5} sx={{ mb: 1 }}>
+              <Stack direction="row" alignItems="center" justifyContent="space-between">
+                <Typography variant="body2">この科目を受験・学習対象にする</Typography>
+                <Switch
+                  checked={subjects.find((subject) => subject.id === selectedSubjectId)?.is_target ?? false}
+                  onChange={(event) => setTarget("subjects", selectedSubjectId, event.target.checked)}
+                />
+              </Stack>
+              <Stack direction="row" alignItems="center" justifyContent="space-between">
+                <Box>
+                  <Typography variant="body2">記録画面で知識タグ入力にする</Typography>
+                  <Typography variant="caption" color="text.secondary">地理・政経など暗記系科目向け。範囲入力の代わりにトピックタグを選べます</Typography>
+                </Box>
+                <Switch
+                  checked={subjects.find((subject) => subject.id === selectedSubjectId)?.input_profile === "knowledge_tag"}
+                  onChange={(event) => setKnowledgeTagProfile(selectedSubjectId, event.target.checked)}
+                />
+              </Stack>
+              <Stack direction="row" alignItems="center" justifyContent="space-between">
+                <Box>
+                  <Typography variant="body2">この科目の知識コラムを生成する</Typography>
+                  <Typography variant="caption" color="text.secondary">夜間バッチが弱点トピックの解説コラムを自動生成します</Typography>
+                </Box>
+                <Switch
+                  checked={subjects.find((subject) => subject.id === selectedSubjectId)?.columns_enabled ?? false}
+                  onChange={(event) => setColumnsEnabled(selectedSubjectId, event.target.checked)}
+                />
+              </Stack>
             </Stack>
           )}
 

@@ -162,3 +162,9 @@ select id, u.name, u.sort_order from subjects, (values
   ('語彙・表現', 3),
   ('テーマ理解・知識', 4)
 ) as u(name, sort_order) where subjects.name = '小論文';
+
+-- ============================================================
+-- 知識系科目の初期設定(設定画面で科目ごとにON/OFF変更可能)
+-- ============================================================
+update subjects set input_profile = 'knowledge_tag', columns_enabled = true
+  where name in ('地理', '政治経済');

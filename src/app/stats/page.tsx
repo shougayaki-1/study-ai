@@ -19,6 +19,8 @@ import MenuItem from "@mui/material/MenuItem";
 import TextField from "@mui/material/TextField";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import Link from "next/link";
+import ArrowForwardIcon from "@mui/icons-material/ArrowForward";
 import { createClient } from "@/lib/supabase/client";
 import { LEARNING_STATE_LABELS, type LearningState, type Understanding } from "@/lib/learning";
 import { startOfWeekDate } from "@/lib/learning";
@@ -119,6 +121,7 @@ export default function StatsPage() {
   const [selectedUnitId, setSelectedUnitId] = useState<string | null>(null);
   const [weeklyMinutes, setWeeklyMinutes] = useState<number | null>(null);
   const [tab, setTab] = useState(0);
+  const [unreadColumnsCount, setUnreadColumnsCount] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -138,6 +141,7 @@ export default function StatsPage() {
           reviewPhotosRes,
           mockExamsRes,
           mockExamScoresRes,
+          unreadColumnsRes,
         ] = await Promise.all([
           supabase.from("subjects").select("id, name, color, sort_order").order("sort_order"),
           supabase.from("units").select("id, subject_id, name, sort_order").order("sort_order"),
@@ -161,6 +165,7 @@ export default function StatsPage() {
           supabase.from("photos").select("id,storage_path,confidence,needs_review,created_at").eq("needs_review", true).order("created_at", { ascending: false }),
           supabase.from("mock_exams").select("id, exam_title, taken_date, total_score, total_deviation, judgments_json").order("taken_date", { ascending: true }),
           supabase.from("mock_exam_scores").select("id, mock_exam_id, subject_id, score, max_score, score_rate, deviation_value"),
+          supabase.from("knowledge_columns").select("id", { count: "exact", head: true }).is("read_at", null),
         ]);
         if (!active) return;
         if (
@@ -171,7 +176,7 @@ export default function StatsPage() {
           reportsRes.error ||
           essaysRes.error
           || snapshotsRes.error || questionResultsRes.error || reviewPhotosRes.error
-          || mockExamsRes.error || mockExamScoresRes.error
+          || mockExamsRes.error || mockExamScoresRes.error || unreadColumnsRes.error
         ) {
           setConfigError(
             "データを取得できませんでした。Supabaseの接続設定(.env.local)を確認してください。",
@@ -189,6 +194,7 @@ export default function StatsPage() {
         setReviewPhotos((reviewPhotosRes.data ?? []) as ReviewPhoto[]);
         setMockExams((mockExamsRes.data ?? []) as MockExam[]);
         setMockExamScores((mockExamScoresRes.data ?? []) as MockExamScore[]);
+        setUnreadColumnsCount(unreadColumnsRes.count ?? 0);
       } catch {
         if (active) setConfigError("Supabaseに接続できません。.env.local を確認してください。");
       } finally {
@@ -327,6 +333,19 @@ export default function StatsPage() {
           <Typography fontWeight={700} sx={{ mt: 1 }}>状況確認</Typography>
           <Typography variant="body2">{weeklyReview.undiagnosed.length ? `${weeklyReview.undiagnosed.map((row) => row.name).join("、")}を短い確認学習で診断` : "対象単元はすべて診断済みです"}</Typography>
         </Paper>
+        <Paper component={Link} href="/columns" variant="outlined" sx={{ p: 2, display: "flex", alignItems: "center", justifyContent: "space-between", textDecoration: "none", color: "inherit" }}>
+          <Box>
+            <Typography fontWeight={700}>知識コラム</Typography>
+            <Typography variant="body2" color="text.secondary">
+              {unreadColumnsCount > 0 ? `未読 ${unreadColumnsCount}件` : "弱点トピックの解説を読む"}
+            </Typography>
+          </Box>
+          <Stack direction="row" spacing={1} alignItems="center">
+            {unreadColumnsCount > 0 && <Chip size="small" color="primary" label={unreadColumnsCount} />}
+            <ArrowForwardIcon fontSize="small" />
+          </Stack>
+        </Paper>
+
         {/* 弱点ヒートマップ */}
         <Paper variant="outlined" sx={{ p: 2 }}>
           <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1.5 }}>
