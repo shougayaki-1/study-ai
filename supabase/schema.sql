@@ -109,10 +109,12 @@ create table if not exists photos (
   created_at timestamptz not null default now()
 );
 
--- 演習写真・小論文答案・模試/演習PDFの取り込み対応
+-- 演習写真・小論文答案・模試/演習PDF・Notion取り込みの対応
+-- 'notion_import' は写真/PDFを伴わない外部データ取り込み(例: Notionの模試ログ)用の
+-- プレースホルダーphotos行に使う(question_results.photo_idがnot nullのため)。
 alter table photos drop constraint if exists photos_kind_check;
 alter table photos add constraint photos_kind_check
-  check (kind in ('exercise', 'essay', 'pdf_mock_exam', 'pdf_quiz'));
+  check (kind in ('exercise', 'essay', 'pdf_mock_exam', 'pdf_quiz', 'notion_import'));
 
 -- 写真から抽出した問題ごとの正誤
 create table if not exists question_results (
@@ -254,7 +256,7 @@ alter table question_results add column if not exists confidence numeric;
 alter table question_results add column if not exists source text not null default 'photo';
 alter table question_results drop constraint if exists question_results_source_check;
 alter table question_results add constraint question_results_source_check
-  check (source in ('photo', 'pdf_mock_exam', 'pdf_quiz'));
+  check (source in ('photo', 'pdf_mock_exam', 'pdf_quiz', 'notion_import'));
 alter table question_results add column if not exists raw_topic_tags jsonb;
 alter table question_results add column if not exists mock_exam_id uuid references mock_exams(id) on delete set null;
 alter table question_results add column if not exists corrected_at timestamptz;

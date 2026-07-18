@@ -50,7 +50,7 @@ type EssayReview = {
 type Snapshot = { unit_id: string; snapshot_date: string; state: LearningState; accuracy: number | null; weakness_score: number; understanding: Understanding | null; evidence_json: Record<string, unknown> | null };
 type QuestionResult = { id: string; photo_id: string; unit_id: string | null; question_label: string | null; is_correct: boolean | null; error_type: string | null; confidence: number | null; created_at: string; source: string };
 
-const SOURCE_LABELS: Record<string, string> = { photo: "写真", pdf_mock_exam: "模試", pdf_quiz: "演習PDF" };
+const SOURCE_LABELS: Record<string, string> = { photo: "写真", pdf_mock_exam: "模試", pdf_quiz: "演習PDF", notion_import: "Notion" };
 type ReviewPhoto = { id: string; storage_path: string; confidence: number | null; needs_review: boolean; created_at: string };
 type MockExamJudgment = { rank: number; school: string; deviation: number; judgment: string };
 type MockExam = {
