@@ -138,7 +138,9 @@ Node標準機能のみで完結する)。
      {"photo_id": "...", "unit_id": "...", "question_label": "大問1-3", "is_correct": true, "source": "pdf_mock_exam", "raw_topic_tags": {"level1": "通信文の読解", "level2": "メール", "level3": "内容一致"}, "mock_exam_id": "<上で保持したexam.id>", "confidence": 0.9}
      ```
    - 挿入後、`node analysis/helpers/mark-photo-status.mjs <photo_id> analyzed '<result_json>'` で
-     `photos.status`を`analyzed`にする。
+     `photos.status`を`analyzed`にする。続けて`node analysis/helpers/delete-photo-file.mjs <storage_path>`で
+     Storage上のPDF原本を削除する(必要なデータは`mock_exams`/`mock_exam_scores`/`question_results`に
+     構造化して保存済みのため、原本を残す必要はない。Storage容量の節約が目的)。
 3. **`kind=pdf_quiz`の場合**(大問別演習の解説PDF、東進タグなし):
    - 設問ごとの「正解・あなたの解答・配点・あなたの得点」表と、プローズの解説文を読む。
      `得点 == 配点`なら正解、それ以外は不正解として扱う。
@@ -149,7 +151,9 @@ Node標準機能のみで完結する)。
      ```json
      {"photo_id": "...", "unit_id": "...", "question_label": "問1", "is_correct": true, "source": "pdf_quiz", "confidence": 0.75}
      ```
-   - 挿入後、`mark-photo-status.mjs <photo_id> analyzed`で`analyzed`にする。
+   - 挿入後、`mark-photo-status.mjs <photo_id> analyzed`で`analyzed`にする。続けて
+     `node analysis/helpers/delete-photo-file.mjs <storage_path>`でStorage上のPDF原本を削除する
+     (理由は`pdf_mock_exam`と同じ)。
 4. **読み取り不能な場合**(表構造が崩れている、パスワード保護、想定外レイアウト等):
    手順1の写真読み取りと同様に`mark-photo-status.mjs <photo_id> failed '<result_json>'`で
    `failed`にし、理由を記録する。日次レポートで必ず報告する。

@@ -117,6 +117,21 @@ export async function downloadStorageObject(bucket, storagePath, destPath) {
   return destPath;
 }
 
+/** Supabase Storageからオブジェクトを削除する(解析済みPDFの容量削減用) */
+export async function deleteStorageObject(bucket, storagePath) {
+  const { url, key } = loadEnv();
+  const res = await fetch(`${url}/storage/v1/object/${bucket}`, {
+    method: 'DELETE',
+    headers: authHeaders(key, { 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ prefixes: [storagePath] }),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`Storage delete failed: ${res.status} ${text}`);
+  }
+  return res.json();
+}
+
 /** helpers スクリプトの CLI 共通: 標準出力に JSON を1行で出す */
 export function printJson(data) {
   process.stdout.write(JSON.stringify(data, null, 2) + '\n');
