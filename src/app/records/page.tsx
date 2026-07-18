@@ -6,14 +6,14 @@ import Paper from "@mui/material/Paper";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import Chip from "@mui/material/Chip";
-import Tabs from "@mui/material/Tabs";
-import Tab from "@mui/material/Tab";
 import Alert from "@mui/material/Alert";
 import CircularProgress from "@mui/material/CircularProgress";
 import Button from "@mui/material/Button";
 import IconButton from "@mui/material/IconButton";
 import TextField from "@mui/material/TextField";
 import MenuItem from "@mui/material/MenuItem";
+import ToggleButton from "@mui/material/ToggleButton";
+import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
 import Dialog from "@mui/material/Dialog";
 import DialogTitle from "@mui/material/DialogTitle";
 import DialogContent from "@mui/material/DialogContent";
@@ -21,6 +21,9 @@ import DialogActions from "@mui/material/DialogActions";
 import EditIcon from "@mui/icons-material/Edit";
 import DeleteIcon from "@mui/icons-material/Delete";
 import PhotoCameraIcon from "@mui/icons-material/PhotoCamera";
+import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
+import ChevronRightIcon from "@mui/icons-material/ChevronRight";
+import TodayIcon from "@mui/icons-material/Today";
 import { createClient } from "@/lib/supabase/client";
 import { UNDERSTANDING_LABELS, type Understanding } from "@/lib/learning";
 import { RECORD_TYPE_LABELS, type RecordType } from "@/lib/study-session";
@@ -33,7 +36,41 @@ type Session = {
 };
 type Named = { id: string; name: string; color?: string; subject_id?: string };
 type Result = { is_correct: boolean | null; created_at: string };
+type PeriodMode = "day" | "week" | "month";
 const COMMON_TEST_SECTIONS = ["年度通し", ...Array.from({ length: 8 }, (_, index) => `大問${index + 1}`)];
+
+function localDateString(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+function parseLocalDate(value: string) {
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(year, month - 1, day);
+}
+function rangeFor(mode: PeriodMode, refDate: string) {
+  const ref = parseLocalDate(refDate);
+  if (mode === "day") return { start: ref, end: ref };
+  if (mode === "week") {
+    const mondayOffset = (ref.getDay() + 6) % 7;
+    const start = new Date(ref.getFullYear(), ref.getMonth(), ref.getDate() - mondayOffset);
+    const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6);
+    return { start, end };
+  }
+  const start = new Date(ref.getFullYear(), ref.getMonth(), 1);
+  const end = new Date(ref.getFullYear(), ref.getMonth() + 1, 0);
+  return { start, end };
+}
+function shiftRefDate(mode: PeriodMode, refDate: string, delta: number) {
+  const ref = parseLocalDate(refDate);
+  if (mode === "day") ref.setDate(ref.getDate() + delta);
+  else if (mode === "week") ref.setDate(ref.getDate() + delta * 7);
+  else ref.setMonth(ref.getMonth() + delta);
+  return localDateString(ref);
+}
+function formatRangeLabel(mode: PeriodMode, start: Date, end: Date) {
+  if (mode === "day") return `${start.getFullYear()}年${start.getMonth() + 1}月${start.getDate()}日`;
+  if (mode === "week") return `${start.getFullYear()}年${start.getMonth() + 1}月${start.getDate()}日 〜 ${end.getMonth() + 1}月${end.getDate()}日`;
+  return `${start.getFullYear()}年${start.getMonth() + 1}月`;
+}
 
 export default function RecordsPage() {
   const supabase = createClient();
@@ -44,15 +81,17 @@ export default function RecordsPage() {
   const [units, setUnits] = useState<Named[]>([]);
   const [materials, setMaterials] = useState<Named[]>([]);
   const [results, setResults] = useState<Result[]>([]);
-  const [period, setPeriod] = useState(0);
+  const [mode, setMode] = useState<PeriodMode>("day");
+  const [refDate, setRefDate] = useState(() => localDateString(new Date()));
   const [editing, setEditing] = useState<Session | null>(null);
   const [saving, setSaving] = useState(false);
   const [photoSession, setPhotoSession] = useState<Session | null>(null);
+  const [photoKind, setPhotoKind] = useState<"exercise" | "essay" | "pdf_mock_exam" | "pdf_quiz">("exercise");
   const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
     const since = new Date();
-    since.setDate(since.getDate() - 90);
+    since.setDate(since.getDate() - 400);
     Promise.all([
       supabase.from("study_sessions").select("id,subject_id,unit_id,material_id,minutes,study_date,understanding,record_type,common_test_year,common_test_section,memo").gte("study_date", since.toISOString().slice(0, 10)).order("study_date", { ascending: false }),
       supabase.from("subjects").select("id,name,color"),
@@ -72,13 +111,13 @@ export default function RecordsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const { start: rangeStart, end: rangeEnd } = useMemo(() => rangeFor(mode, refDate), [mode, refDate]);
+  const startKey = localDateString(rangeStart);
+  const endKey = localDateString(rangeEnd);
+
   const visibleSessions = useMemo(() => {
-    const since = new Date();
-    since.setHours(0, 0, 0, 0);
-    since.setDate(since.getDate() - [0, 6, 29][period]);
-    const key = since.toISOString().slice(0, 10);
-    return sessions.filter((session) => session.study_date >= key);
-  }, [sessions, period]);
+    return sessions.filter((session) => session.study_date >= startKey && session.study_date <= endKey);
+  }, [sessions, startKey, endKey]);
 
   const total = visibleSessions.reduce((sum, session) => sum + session.minutes, 0);
   const bySubject = subjects.map((subject) => ({
@@ -86,11 +125,10 @@ export default function RecordsPage() {
     minutes: visibleSessions.filter((session) => session.subject_id === subject.id).reduce((sum, session) => sum + session.minutes, 0),
   })).filter((subject) => subject.minutes > 0).sort((a, b) => b.minutes - a.minutes);
   const recentResults = useMemo(() => {
-    const since = new Date();
-    since.setHours(0, 0, 0, 0);
-    since.setDate(since.getDate() - [0, 6, 29][period]);
-    return results.filter((result) => result.created_at >= since.toISOString());
-  }, [results, period]);
+    const startInstant = rangeStart.toISOString();
+    const endExclusive = new Date(rangeEnd.getFullYear(), rangeEnd.getMonth(), rangeEnd.getDate() + 1).toISOString();
+    return results.filter((result) => result.created_at >= startInstant && result.created_at < endExclusive);
+  }, [results, rangeStart, rangeEnd]);
   const correct = recentResults.filter((result) => result.is_correct === true).length;
   const accuracy = recentResults.length ? Math.round(correct / recentResults.length * 100) : null;
   const nameOf = (rows: Named[], id: string | null) => rows.find((row) => row.id === id)?.name;
@@ -137,7 +175,7 @@ export default function RecordsPage() {
         const path = `${photoSession.id}/${Date.now()}-${crypto.randomUUID()}.${ext}`;
         const { error: storageError } = await supabase.storage.from("photos").upload(path, file);
         if (storageError) throw storageError;
-        const { error: rowError } = await supabase.from("photos").insert({ session_id: photoSession.id, storage_path: path, kind: "exercise", status: "pending" });
+        const { error: rowError } = await supabase.from("photos").insert({ session_id: photoSession.id, storage_path: path, kind: photoKind, status: "pending" });
         if (rowError) throw rowError;
       }
       setPhotoSession(null);
@@ -151,9 +189,17 @@ export default function RecordsPage() {
   return (
     <Box sx={{ p: 2, pb: 10, maxWidth: 560, mx: "auto" }}>
       <Typography variant="h6" fontWeight={700} sx={{ mb: 1 }}>履歴</Typography>
-      <Tabs value={period} onChange={(_, value) => setPeriod(value)} variant="fullWidth" sx={{ mb: 2 }}>
-        <Tab label="今日" /><Tab label="7日" /><Tab label="30日" />
-      </Tabs>
+      <ToggleButtonGroup exclusive fullWidth size="small" value={mode} onChange={(_, value: PeriodMode | null) => value && setMode(value)} sx={{ mb: 1 }}>
+        <ToggleButton value="day">日</ToggleButton>
+        <ToggleButton value="week">週</ToggleButton>
+        <ToggleButton value="month">月</ToggleButton>
+      </ToggleButtonGroup>
+      <Stack direction="row" spacing={0.5} alignItems="center" justifyContent="center" sx={{ mb: 2 }}>
+        <IconButton aria-label="前へ" size="small" onClick={() => setRefDate((current) => shiftRefDate(mode, current, -1))}><ChevronLeftIcon /></IconButton>
+        <Typography variant="body2" fontWeight={700} sx={{ minWidth: 180, textAlign: "center" }}>{formatRangeLabel(mode, rangeStart, rangeEnd)}</Typography>
+        <IconButton aria-label="次へ" size="small" onClick={() => setRefDate((current) => shiftRefDate(mode, current, 1))}><ChevronRightIcon /></IconButton>
+        <IconButton aria-label="今日に戻る" size="small" onClick={() => setRefDate(localDateString(new Date()))}><TodayIcon fontSize="small" /></IconButton>
+      </Stack>
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
       <Stack spacing={2}>
         <Stack direction="row" spacing={1}>
@@ -194,7 +240,25 @@ export default function RecordsPage() {
         </Stack>}</DialogContent>
         <DialogActions><Button onClick={() => setEditing(null)} disabled={saving}>キャンセル</Button><Button variant="contained" onClick={saveEdit} disabled={saving}>{saving ? "保存中..." : "保存"}</Button></DialogActions>
       </Dialog>
-      <Dialog open={!!photoSession} onClose={() => !uploading && setPhotoSession(null)} fullWidth maxWidth="xs"><DialogTitle>あとから写真を追加</DialogTitle><DialogContent><Typography variant="body2">{photoSession?.study_date}の記録に、丸付け済みの写真を追加します。</Typography></DialogContent><DialogActions><Button onClick={() => setPhotoSession(null)} disabled={uploading}>キャンセル</Button><Button component="label" variant="contained" disabled={uploading}>{uploading ? "アップロード中..." : "写真を選ぶ"}<input hidden multiple accept="image/*" type="file" onChange={(event) => uploadPhoto(event.target.files)} /></Button></DialogActions></Dialog>
+      <Dialog open={!!photoSession} onClose={() => !uploading && setPhotoSession(null)} fullWidth maxWidth="xs">
+        <DialogTitle>あとから写真・PDFを追加</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ mb: 1.5 }}>{photoSession?.study_date}の記録に、丸付け済みの写真やPDFを追加します。</Typography>
+          <ToggleButtonGroup exclusive value={photoKind} onChange={(_, value) => value && setPhotoKind(value)} size="small" sx={{ flexWrap: "wrap" }}>
+            <ToggleButton value="exercise">演習写真</ToggleButton>
+            <ToggleButton value="essay">小論文写真</ToggleButton>
+            <ToggleButton value="pdf_mock_exam">模試PDF</ToggleButton>
+            <ToggleButton value="pdf_quiz">演習解説PDF</ToggleButton>
+          </ToggleButtonGroup>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setPhotoSession(null)} disabled={uploading}>キャンセル</Button>
+          <Button component="label" variant="contained" disabled={uploading}>
+            {uploading ? "アップロード中..." : photoKind.startsWith("pdf") ? "PDFを選ぶ" : "写真を選ぶ"}
+            <input hidden multiple accept={photoKind.startsWith("pdf") ? "application/pdf" : "image/*"} type="file" onChange={(event) => uploadPhoto(event.target.files)} />
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }
