@@ -81,6 +81,16 @@ function heatColor(score: number, max: number) {
   return `rgba(229, 57, 53, ${alpha.toFixed(2)})`;
 }
 
+function localDateStr(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function shiftMonth(yearMonth: string, delta: number) {
+  const [y, m] = yearMonth.split("-").map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
 function startOfWeek(d: Date) {
   const date = new Date(d.getFullYear(), d.getMonth(), d.getDate());
   const day = date.getDay();
@@ -122,6 +132,8 @@ export default function StatsPage() {
   const [weeklyMinutes, setWeeklyMinutes] = useState<number | null>(null);
   const [tab, setTab] = useState(0);
   const [unreadColumnsCount, setUnreadColumnsCount] = useState(0);
+  const [reportDate, setReportDate] = useState(() => localDateStr(new Date()));
+  const [calendarMonth, setCalendarMonth] = useState(() => localDateStr(new Date()).slice(0, 7));
 
   useEffect(() => {
     let active = true;
@@ -153,8 +165,7 @@ export default function StatsPage() {
           supabase
             .from("reports")
             .select("id, kind, body_md, created_at")
-            .order("created_at", { ascending: false })
-            .limit(10),
+            .order("created_at", { ascending: false }),
           supabase
             .from("essay_reviews")
             .select("id, structure_comment, logic_comment, vocab_comment, overall, created_at")
@@ -213,6 +224,29 @@ export default function StatsPage() {
     weaknesses.forEach((w) => map.set(w.unit_id, w));
     return map;
   }, [weaknesses]);
+
+  const reportsByDate = useMemo(() => {
+    const map = new Map<string, Report[]>();
+    reports.forEach((r) => {
+      const key = localDateStr(new Date(r.created_at));
+      const arr = map.get(key) ?? [];
+      arr.push(r);
+      map.set(key, arr);
+    });
+    return map;
+  }, [reports]);
+
+  const calendarCells = useMemo(() => {
+    const [y, m] = calendarMonth.split("-").map(Number);
+    const first = new Date(y, m - 1, 1);
+    const startWeekday = (first.getDay() + 6) % 7; // 月曜始まり
+    const daysInMonth = new Date(y, m, 0).getDate();
+    const cells: Array<string | null> = Array.from({ length: startWeekday }, () => null);
+    for (let d = 1; d <= daysInMonth; d++) {
+      cells.push(`${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`);
+    }
+    return cells;
+  }, [calendarMonth]);
 
   const maxScore = useMemo(
     () => weaknesses.reduce((m, w) => Math.max(m, w.score ?? 0), 0),
@@ -550,14 +584,61 @@ export default function StatsPage() {
             <Tab label="小論文講評" sx={{ minHeight: 36 }} />
           </Tabs>
 
+          {tab === 0 && (
+            <Box sx={{ mb: 1.5 }}>
+              <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 0.5 }}>
+                <Button size="small" onClick={() => setCalendarMonth((m) => shiftMonth(m, -1))}>‹</Button>
+                <Typography variant="body2" fontWeight={700}>{calendarMonth}</Typography>
+                <Button size="small" onClick={() => setCalendarMonth((m) => shiftMonth(m, 1))}>›</Button>
+              </Stack>
+              <Box sx={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 0.5 }}>
+                {["月", "火", "水", "木", "金", "土", "日"].map((label) => (
+                  <Typography key={label} variant="caption" align="center" color="text.secondary">{label}</Typography>
+                ))}
+                {calendarCells.map((date, i) => {
+                  if (!date) return <Box key={`empty-${i}`} />;
+                  const dayReports = reportsByDate.get(date) ?? [];
+                  const hasDaily = dayReports.some((r) => r.kind === "daily");
+                  const hasWeekly = dayReports.some((r) => r.kind === "weekly");
+                  const isSelected = date === reportDate;
+                  return (
+                    <Box
+                      key={date}
+                      onClick={() => setReportDate(date)}
+                      sx={{
+                        textAlign: "center",
+                        py: 0.5,
+                        borderRadius: 1,
+                        cursor: "pointer",
+                        border: "1px solid",
+                        borderColor: isSelected ? "primary.main" : "#eee",
+                        backgroundColor: hasDaily || hasWeekly ? "action.hover" : "transparent",
+                      }}
+                    >
+                      <Typography variant="caption">{Number(date.slice(-2))}</Typography>
+                      {(hasDaily || hasWeekly) && (
+                        <Box sx={{ display: "flex", justifyContent: "center", gap: 0.25, mt: 0.25 }}>
+                          {hasDaily && <Box sx={{ width: 4, height: 4, borderRadius: "50%", backgroundColor: "primary.main" }} />}
+                          {hasWeekly && <Box sx={{ width: 4, height: 4, borderRadius: "50%", backgroundColor: "secondary.main" }} />}
+                        </Box>
+                      )}
+                    </Box>
+                  );
+                })}
+              </Box>
+            </Box>
+          )}
+
           {tab === 0 &&
-            (reports.length === 0 ? (
+            ((reportsByDate.get(reportDate) ?? []).length === 0 ? (
               <Typography variant="body2">
-                まだレポートがありません(夜間バッチ実行後に表示されます)
+                {reports.length === 0
+                  ? "まだレポートがありません(夜間バッチ実行後に表示されます)"
+                  : "この日のレポートはありません(色付きの日を選んでください)"}
               </Typography>
             ) : (
               <Stack divider={<Divider />} spacing={1.5}>
-                {reports.map((r) => (
+                {(reportsByDate.get(reportDate) ?? []).map((r) => (
                   <Box key={r.id}>
                     <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
                       <Chip

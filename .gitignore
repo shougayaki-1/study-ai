@@ -39,6 +39,9 @@ yarn-error.log*
 .env*
 !.env.local.example
 
+# personal study data (mock exam scores, target schools etc.) - not meant to be committed
+/docs/study-profile/
+
 # analysis (Claude Code batch, service role key)
 analysis/.env
 analysis/tmp/
