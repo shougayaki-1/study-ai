@@ -22,6 +22,7 @@ for (const row of arr) {
   if (!row.reason || !row.range_text || !row.estimated_minutes || !row.source_kind) {
     throw new Error('各review_taskには reason, range_text, estimated_minutes, source_kind が必要です');
   }
+  if (!row.unit_id && !row.subject_id) throw new Error('各review_taskには unit_id または subject_id が必要です');
 }
 const inserted = await db.insert('review_tasks', arr);
 printJson(inserted);

@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:analysis": "node --test analysis/menubar-app/test/*.test.js analysis/test/*.test.mjs"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",

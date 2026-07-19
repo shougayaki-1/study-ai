@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
@@ -17,8 +17,8 @@ import Chip from "@mui/material/Chip";
 import CircularProgress from "@mui/material/CircularProgress";
 import AddIcon from "@mui/icons-material/Add";
 import DeleteIcon from "@mui/icons-material/Delete";
-import PhotoCameraIcon from "@mui/icons-material/PhotoCamera";
 import { createClient } from "@/lib/supabase/client";
+import { PhotoUploadPanel } from "@/components/photo-upload-panel";
 import { RECORD_TYPES, type RecordType } from "@/lib/study-session";
 import {
   UNDERSTANDING_LABELS,
@@ -33,6 +33,7 @@ type Subject = { id: string; name: string; color: string; sort_order: number; in
 type Unit = { id: string; subject_id: string; name: string; sort_order: number };
 type Material = { id: string; subject_id: string; name: string; difficulty: string };
 type TopicTag = { id: string; subject_id: string; name: string; usage_count: number };
+type CommonTestUnitMap = { subject_id: string; exam_year: number | null; section: string; unit_id: string; confidence: number };
 type Entry = {
   key: string;
   subjectId: string;
@@ -103,20 +104,18 @@ function RecordPageInner() {
   const supabase = createClient();
   const searchParams = useSearchParams();
   const planBlockId = searchParams.get("planBlockId");
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(true);
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
   const [materials, setMaterials] = useState<Material[]>([]);
   const [topicTags, setTopicTags] = useState<TopicTag[]>([]);
+  const [commonTestMaps, setCommonTestMaps] = useState<CommonTestUnitMap[]>([]);
   const [previous, setPrevious] = useState<PreviousSession[]>([]);
   const [studyDate, setStudyDate] = useState(todayString());
   const [entries, setEntries] = useState<Entry[]>([newEntry()]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [summary, setSummary] = useState<SavedSummary | null>(null);
-  const [photoKind, setPhotoKind] = useState<"exercise" | "essay" | "pdf_mock_exam" | "pdf_quiz">("exercise");
-  const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -125,20 +124,22 @@ function RecordPageInner() {
       supabase.from("units").select("id,subject_id,name,sort_order").order("sort_order"),
       supabase.from("materials").select("id,subject_id,name,difficulty").order("name"),
       supabase.from("topic_tags").select("id,subject_id,name,usage_count").order("usage_count", { ascending: false }),
+      supabase.from("common_test_unit_map").select("subject_id,exam_year,section,unit_id,confidence"),
       supabase
         .from("study_sessions")
         .select("unit_id,understanding,subject_id,material_id,range_text,created_at")
         .order("created_at", { ascending: false })
         .limit(200),
-    ]).then(([s, u, m, t, h]) => {
+    ]).then(([s, u, m, t, maps, h]) => {
       if (!active) return;
-      const firstError = s.error ?? u.error ?? m.error ?? t.error ?? h.error;
+      const firstError = s.error ?? u.error ?? m.error ?? t.error ?? maps.error ?? h.error;
       if (firstError) setError(firstError.message);
       const subjectRows = (s.data ?? []) as Subject[];
       setSubjects(subjectRows);
       setUnits((u.data ?? []) as Unit[]);
       setMaterials((m.data ?? []) as Material[]);
       setTopicTags((t.data ?? []) as TopicTag[]);
+      setCommonTestMaps((maps.data ?? []) as CommonTestUnitMap[]);
       setPrevious((h.data ?? []) as PreviousSession[]);
       const last = (h.data?.[0] ?? null) as { subject_id?: string; material_id?: string; unit_id?: string } | null;
       if (planBlockId) {
@@ -187,6 +188,18 @@ function RecordPageInner() {
     setEntries((current) => current.map((entry) => entry.key === key ? { ...entry, ...patch } : entry));
   };
 
+  const updateCommonTestEntry = (key: string, patch: Partial<Entry>) => {
+    setEntries((current) => current.map((entry) => {
+      if (entry.key !== key) return entry;
+      const updated = { ...entry, ...patch };
+      if (updated.commonTestMode === "by_year") return { ...updated, unitId: "" };
+      const year = Number(updated.commonTestYear);
+      const candidates = commonTestMaps.filter((map) => map.subject_id === updated.subjectId && map.section === updated.commonTestSection);
+      const mapping = candidates.find((map) => map.exam_year === year) ?? candidates.find((map) => map.exam_year == null);
+      return { ...updated, unitId: mapping?.unit_id ?? "" };
+    }));
+  };
+
   const selectUnitOrMaterial = (entryKey: string, patch: Partial<Entry>) => {
     setEntries((current) => current.map((entry) => {
       if (entry.key !== entryKey) return entry;
@@ -214,7 +227,7 @@ function RecordPageInner() {
       minutes: entry.minutes,
       study_date: studyDate,
       record_type: entry.recordType,
-      common_test_year: entry.recordType === "common_test" && entry.commonTestMode === "by_year" ? Number(entry.commonTestYear) : null,
+      common_test_year: entry.recordType === "common_test" ? Number(entry.commonTestYear) : null,
       common_test_section: entry.recordType === "common_test" && entry.commonTestMode === "by_section" ? entry.commonTestSection : null,
       understanding: entry.understanding,
       memo: entry.memo.trim() || null,
@@ -279,32 +292,6 @@ function RecordPageInner() {
     setSaving(false);
   };
 
-  const uploadPhotos = async (files: FileList | null) => {
-    if (!files?.length || !summary?.firstSessionId) return;
-    setUploading(true);
-    setError(null);
-    try {
-      for (const file of Array.from(files)) {
-        const ext = file.name.split(".").pop() || "jpg";
-        const path = `${summary.firstSessionId}/${Date.now()}-${crypto.randomUUID()}.${ext}`;
-        const { error: uploadError } = await supabase.storage.from("photos").upload(path, file);
-        if (uploadError) throw uploadError;
-        const { error: rowError } = await supabase.from("photos").insert({
-          session_id: summary.firstSessionId,
-          storage_path: path,
-          kind: photoKind,
-          status: "pending",
-        });
-        if (rowError) throw rowError;
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "写真のアップロードに失敗しました。");
-    } finally {
-      setUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
-    }
-  };
-
   if (loading) return <Box sx={{ p: 4, textAlign: "center" }}><CircularProgress /></Box>;
 
   if (summary) {
@@ -326,23 +313,7 @@ function RecordPageInner() {
           </Paper>
           <Paper variant="outlined" sx={{ p: 2 }}>
             <Typography fontWeight={700} sx={{ mb: 1 }}>丸付け済み写真・小論文・PDFを追加</Typography>
-            <ToggleButtonGroup exclusive value={photoKind} onChange={(_, value) => value && setPhotoKind(value)} size="small" sx={{ mb: 1, flexWrap: "wrap" }}>
-              <ToggleButton value="exercise">演習写真</ToggleButton>
-              <ToggleButton value="essay">小論文写真</ToggleButton>
-              <ToggleButton value="pdf_mock_exam">模試PDF</ToggleButton>
-              <ToggleButton value="pdf_quiz">演習解説PDF</ToggleButton>
-            </ToggleButtonGroup>
-            <input
-              ref={fileInputRef}
-              hidden
-              multiple
-              accept={photoKind.startsWith("pdf") ? "application/pdf" : "image/*"}
-              type="file"
-              onChange={(event) => uploadPhotos(event.target.files)}
-            />
-            <Button fullWidth variant="outlined" startIcon={<PhotoCameraIcon />} disabled={uploading} onClick={() => fileInputRef.current?.click()}>
-              {uploading ? "アップロード中..." : photoKind.startsWith("pdf") ? "PDFを選ぶ" : "写真を選ぶ"}
-            </Button>
+            {summary.firstSessionId && <PhotoUploadPanel sessionId={summary.firstSessionId} />}
           </Paper>
           {error && <Alert severity="error">{error}</Alert>}
           <Button variant="contained" onClick={() => { setSummary(null); setEntries([newEntry(subjects[0]?.id)]); }}>続けて記録する</Button>
@@ -367,7 +338,7 @@ function RecordPageInner() {
                 {entries.length > 1 && <IconButton size="small" onClick={() => setEntries((current) => current.filter((item) => item.key !== entry.key))}><DeleteIcon /></IconButton>}
               </Stack>
               <Stack spacing={1.5}>
-                <TextField select label="科目" value={entry.subjectId} onChange={(event) => updateEntry(entry.key, { subjectId: event.target.value, unitId: "", materialId: "" })} size="small" fullWidth>
+                <TextField select label="科目" value={entry.subjectId} onChange={(event) => entry.recordType === "common_test" ? updateCommonTestEntry(entry.key, { subjectId: event.target.value, materialId: "" }) : updateEntry(entry.key, { subjectId: event.target.value, unitId: "", materialId: "" })} size="small" fullWidth>
                   {subjects.map((subject) => <MenuItem key={subject.id} value={subject.id}>{subject.name}</MenuItem>)}
                 </TextField>
                 <ToggleButtonGroup exclusive fullWidth size="small" value={entry.recordType} onChange={(_, value: RecordType | null) => value && updateEntry(entry.key, { recordType: value })}>
@@ -375,15 +346,23 @@ function RecordPageInner() {
                 </ToggleButtonGroup>
                 {entry.recordType === "common_test" ? (
                   <Stack spacing={1}>
-                    <ToggleButtonGroup exclusive fullWidth size="small" value={entry.commonTestMode} onChange={(_, value: Entry["commonTestMode"] | null) => value && updateEntry(entry.key, { commonTestMode: value })}>
-                      <ToggleButton value="by_year">年度別（共通テスト）</ToggleButton>
-                      <ToggleButton value="by_section">大問別（センター試験）</ToggleButton>
+                    <ToggleButtonGroup exclusive fullWidth size="small" value={entry.commonTestMode} onChange={(_, value: Entry["commonTestMode"] | null) => value && updateCommonTestEntry(entry.key, { commonTestMode: value })}>
+                      <ToggleButton value="by_year">年度通し</ToggleButton>
+                      <ToggleButton value="by_section">大問別</ToggleButton>
                     </ToggleButtonGroup>
-                    {entry.commonTestMode === "by_year" ? <TextField select label="年度" value={entry.commonTestYear} onChange={(event) => updateEntry(entry.key, { commonTestYear: event.target.value })} size="small" fullWidth>
+                    <TextField select label="年度" value={entry.commonTestYear} onChange={(event) => updateCommonTestEntry(entry.key, { commonTestYear: event.target.value })} size="small" fullWidth>
                       {COMMON_TEST_YEARS.map((year) => <MenuItem key={year} value={year}>{year}年度</MenuItem>)}
-                    </TextField> : <TextField select label="大問" value={entry.commonTestSection} onChange={(event) => updateEntry(entry.key, { commonTestSection: event.target.value, unitId: "" })} size="small" fullWidth>
-                      {COMMON_TEST_SECTIONS.map((section) => <MenuItem key={section} value={section}>{section}</MenuItem>)}
-                    </TextField>}
+                    </TextField>
+                    {entry.commonTestMode === "by_section" && <>
+                      <TextField select label="大問" value={entry.commonTestSection} onChange={(event) => updateCommonTestEntry(entry.key, { commonTestSection: event.target.value })} size="small" fullWidth>
+                        {COMMON_TEST_SECTIONS.map((section) => <MenuItem key={section} value={section}>{section}</MenuItem>)}
+                      </TextField>
+                      <TextField select label="推定単元（変更可）" value={entry.unitId} onChange={(event) => updateEntry(entry.key, { unitId: event.target.value })} size="small" fullWidth>
+                        <MenuItem value="">未指定</MenuItem>
+                        {filteredUnits.map((unit) => <MenuItem key={unit.id} value={unit.id}>{unit.name}</MenuItem>)}
+                      </TextField>
+                      <Typography variant="caption" color="text.secondary">大問からの推定です。内容が異なる場合は変更してください。</Typography>
+                    </>}
                   </Stack>
                 ) : (
                   <Stack spacing={1.5}>

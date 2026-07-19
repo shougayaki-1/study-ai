@@ -18,7 +18,8 @@ export const dynamic = "force-dynamic";
 
 type ReviewTask = {
   id: string;
-  unit_id: string;
+  subject_id: string | null;
+  unit_id: string | null;
   material_id: string | null;
   range_text: string | null;
   reason: string | null;
@@ -26,6 +27,7 @@ type ReviewTask = {
   done: boolean;
   status?: "pending" | "completed" | "expired";
   units?: { name: string } | null;
+  subjects?: { name: string } | null;
   materials?: { name: string } | null;
 };
 
@@ -70,7 +72,7 @@ export default function HomePage() {
           supabase
             .from("review_tasks")
             .select(
-              "id, unit_id, material_id, range_text, reason, due_date, done, status, units(name), materials(name)",
+              "id, subject_id, unit_id, material_id, range_text, reason, due_date, done, status, subjects(name), units(name), materials(name)",
             )
             .lte("due_date", today)
             .in("status", ["pending", "completed"])
@@ -228,7 +230,7 @@ export default function HomePage() {
                         color: task.done ? "text.disabled" : "text.primary",
                       }}
                     >
-                      {task.units?.name ?? "単元不明"}
+                      {task.units?.name ?? task.subjects?.name ?? "対象不明"}
                       {task.materials?.name ? ` ・ ${task.materials.name}` : ""}
                       {task.range_text ? ` ${task.range_text}` : ""}
                     </Typography>

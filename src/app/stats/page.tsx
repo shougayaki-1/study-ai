@@ -39,6 +39,7 @@ type Session = {
   subject_id: string;
   minutes: number;
   started_at: string;
+  study_date: string;
 };
 type Report = { id: string; kind: string; body_md: string; created_at: string };
 type EssayReview = {
@@ -49,20 +50,34 @@ type EssayReview = {
   overall: string | null;
   created_at: string;
 };
-type Snapshot = { unit_id: string; snapshot_date: string; state: LearningState; accuracy: number | null; weakness_score: number; understanding: Understanding | null; evidence_json: Record<string, unknown> | null };
-type QuestionResult = { id: string; photo_id: string; unit_id: string | null; question_label: string | null; is_correct: boolean | null; error_type: string | null; confidence: number | null; created_at: string; source: string };
+type Snapshot = {
+  unit_id: string;
+  snapshot_date: string;
+  state: LearningState;
+  accuracy: number | null;
+  weakness_score: number;
+  understanding: Understanding | null;
+  stability_days: number | null;
+  next_review_date: string | null;
+  review_count: number;
+  evidence_json: Record<string, unknown> | null;
+};
+type QuestionResult = { id: string; photo_id: string; subject_id: string | null; unit_id: string | null; question_label: string | null; is_correct: boolean | null; score_rate: number | null; result_granularity: "question" | "section"; error_type: string | null; confidence: number | null; corrected_at: string | null; created_at: string; source: string; raw_topic_tags: Record<string, unknown> | null };
 
 const SOURCE_LABELS: Record<string, string> = { photo: "写真", pdf_mock_exam: "模試", pdf_quiz: "演習PDF", notion_import: "Notion" };
 type ReviewPhoto = { id: string; storage_path: string; confidence: number | null; needs_review: boolean; created_at: string };
 type MockExamJudgment = { rank: number; school: string; deviation: number; judgment: string };
 type MockExam = {
   id: string;
+  provider: string;
   exam_title: string;
   taken_date: string;
   total_score: number | null;
   total_deviation: number | null;
   judgments_json: MockExamJudgment[] | null;
 };
+type ReviewTaskMetric = { id: string; status: "pending" | "completed" | "expired"; due_date: string; completed_at: string | null };
+type SectionTiming = { id: string; mock_exam_score_id: string; section: string; actual_seconds: number | null; target_seconds: number | null };
 type MockExamScore = {
   id: string;
   mock_exam_id: string;
@@ -127,6 +142,8 @@ export default function StatsPage() {
   const [reviewPhotos, setReviewPhotos] = useState<ReviewPhoto[]>([]);
   const [mockExams, setMockExams] = useState<MockExam[]>([]);
   const [mockExamScores, setMockExamScores] = useState<MockExamScore[]>([]);
+  const [reviewTaskMetrics, setReviewTaskMetrics] = useState<ReviewTaskMetric[]>([]);
+  const [sectionTimings, setSectionTimings] = useState<SectionTiming[]>([]);
   const [mockExamSubjectId, setMockExamSubjectId] = useState<string>("");
   const [selectedUnitId, setSelectedUnitId] = useState<string | null>(null);
   const [weeklyMinutes, setWeeklyMinutes] = useState<number | null>(null);
@@ -134,6 +151,9 @@ export default function StatsPage() {
   const [unreadColumnsCount, setUnreadColumnsCount] = useState(0);
   const [reportDate, setReportDate] = useState(() => localDateStr(new Date()));
   const [calendarMonth, setCalendarMonth] = useState(() => localDateStr(new Date()).slice(0, 7));
+  const [errorSubjectId, setErrorSubjectId] = useState("");
+  const [errorType, setErrorType] = useState("");
+  const [onlyUnreviewed, setOnlyUnreviewed] = useState(true);
 
   useEffect(() => {
     let active = true;
@@ -154,13 +174,15 @@ export default function StatsPage() {
           mockExamsRes,
           mockExamScoresRes,
           unreadColumnsRes,
+          reviewTasksRes,
+          sectionTimingsRes,
         ] = await Promise.all([
           supabase.from("subjects").select("id, name, color, sort_order").order("sort_order"),
           supabase.from("units").select("id, subject_id, name, sort_order").order("sort_order"),
           supabase.from("weakness_scores").select("unit_id, score, accuracy, last_studied_at"),
           supabase
             .from("study_sessions")
-            .select("subject_id, minutes, started_at")
+            .select("subject_id, minutes, started_at, study_date")
             .gte("started_at", sinceDate.toISOString()),
           supabase
             .from("reports")
@@ -171,12 +193,14 @@ export default function StatsPage() {
             .select("id, structure_comment, logic_comment, vocab_comment, overall, created_at")
             .order("created_at", { ascending: false })
             .limit(10),
-          supabase.from("unit_state_snapshots").select("unit_id,snapshot_date,state,accuracy,weakness_score,understanding,evidence_json").order("snapshot_date", { ascending: false }).limit(500),
-          supabase.from("question_results").select("id,photo_id,unit_id,question_label,is_correct,error_type,confidence,created_at,source").order("created_at", { ascending: false }).limit(500),
+          supabase.from("unit_state_snapshots").select("unit_id,snapshot_date,state,accuracy,weakness_score,understanding,stability_days,next_review_date,review_count,evidence_json").order("snapshot_date", { ascending: false }).limit(500),
+          supabase.from("question_results").select("id,photo_id,subject_id,unit_id,question_label,is_correct,score_rate,result_granularity,error_type,confidence,corrected_at,created_at,source,raw_topic_tags").order("created_at", { ascending: false }).limit(500),
           supabase.from("photos").select("id,storage_path,confidence,needs_review,created_at").eq("needs_review", true).order("created_at", { ascending: false }),
-          supabase.from("mock_exams").select("id, exam_title, taken_date, total_score, total_deviation, judgments_json").order("taken_date", { ascending: true }),
+          supabase.from("mock_exams").select("id, provider, exam_title, taken_date, total_score, total_deviation, judgments_json").order("taken_date", { ascending: true }),
           supabase.from("mock_exam_scores").select("id, mock_exam_id, subject_id, score, max_score, score_rate, deviation_value"),
           supabase.from("knowledge_columns").select("id", { count: "exact", head: true }).is("read_at", null),
+          supabase.from("review_tasks").select("id,status,due_date,completed_at").order("due_date", { ascending: false }).limit(500),
+          supabase.from("mock_exam_section_timings").select("id,mock_exam_score_id,section,actual_seconds,target_seconds"),
         ]);
         if (!active) return;
         if (
@@ -187,7 +211,7 @@ export default function StatsPage() {
           reportsRes.error ||
           essaysRes.error
           || snapshotsRes.error || questionResultsRes.error || reviewPhotosRes.error
-          || mockExamsRes.error || mockExamScoresRes.error || unreadColumnsRes.error
+          || mockExamsRes.error || mockExamScoresRes.error || unreadColumnsRes.error || reviewTasksRes.error || sectionTimingsRes.error
         ) {
           setConfigError(
             "データを取得できませんでした。Supabaseの接続設定(.env.local)を確認してください。",
@@ -205,6 +229,8 @@ export default function StatsPage() {
         setReviewPhotos((reviewPhotosRes.data ?? []) as ReviewPhoto[]);
         setMockExams((mockExamsRes.data ?? []) as MockExam[]);
         setMockExamScores((mockExamScoresRes.data ?? []) as MockExamScore[]);
+        setReviewTaskMetrics((reviewTasksRes.data ?? []) as ReviewTaskMetric[]);
+        setSectionTimings((sectionTimingsRes.data ?? []) as SectionTiming[]);
         setUnreadColumnsCount(unreadColumnsRes.count ?? 0);
       } catch {
         if (active) setConfigError("Supabaseに接続できません。.env.local を確認してください。");
@@ -324,6 +350,63 @@ export default function StatsPage() {
       return { examId: exam.id, label, deviation: row?.deviation_value ?? null };
     });
   }, [mockExams, mockExamScores, mockExamSubjectId]);
+
+  const reviewCompletion = useMemo(() => {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - 28);
+    const cutoffKey = localDateStr(cutoff);
+    const today = localDateStr(new Date());
+    const matured = reviewTaskMetrics.filter((task) => task.due_date >= cutoffKey && task.due_date <= today);
+    const completed = matured.filter((task) => task.status === "completed").length;
+    return { total: matured.length, completed, rate: matured.length ? Math.round(completed / matured.length * 100) : null };
+  }, [reviewTaskMetrics]);
+
+  const judgmentSeries = useMemo(() => {
+    const bySchool = new Map<string, Array<{ date: string; judgment: string }>>();
+    mockExams.forEach((exam) => exam.judgments_json?.forEach((item) => {
+      const rows = bySchool.get(item.school) ?? [];
+      rows.push({ date: exam.taken_date, judgment: item.judgment });
+      bySchool.set(item.school, rows);
+    }));
+    return [...bySchool.entries()].filter(([, rows]) => rows.length >= 2);
+  }, [mockExams]);
+
+  const efficiencyRows = useMemo(() => {
+    const rows: Array<{ subjectId: string; delta: number; minutes: number; perTenHours: number }> = [];
+    for (const subject of subjects) {
+      const scores = mockExamScores
+        .filter((score) => score.subject_id === subject.id && score.deviation_value != null)
+        .map((score) => ({ score, exam: mockExams.find((exam) => exam.id === score.mock_exam_id) }))
+        .filter((item): item is { score: MockExamScore; exam: MockExam } => Boolean(item.exam))
+        .sort((a, b) => a.exam.taken_date.localeCompare(b.exam.taken_date));
+      for (let index = 1; index < scores.length; index++) {
+        const previous = scores[index - 1];
+        const current = scores[index];
+        if (previous.exam.provider !== current.exam.provider) continue;
+        const minutes = sessions.filter((session) => session.subject_id === subject.id && session.study_date > previous.exam.taken_date && session.study_date <= current.exam.taken_date).reduce((sum, session) => sum + session.minutes, 0);
+        if (minutes < 60) continue;
+        const delta = (current.score.deviation_value ?? 0) - (previous.score.deviation_value ?? 0);
+        rows.push({ subjectId: subject.id, delta, minutes, perTenHours: delta / minutes * 600 });
+      }
+    }
+    return rows;
+  }, [mockExamScores, mockExams, sessions, subjects]);
+
+  const errorRows = useMemo(() => questionResults.filter((result) => {
+    const needsReview = result.is_correct === false || (result.result_granularity === "section" && result.score_rate != null && result.score_rate < 70);
+    if (!needsReview) return false;
+    const subjectId = result.subject_id ?? units.find((unit) => unit.id === result.unit_id)?.subject_id ?? null;
+    if (errorSubjectId && subjectId !== errorSubjectId) return false;
+    if (errorType && result.error_type !== errorType) return false;
+    if (onlyUnreviewed && result.corrected_at) return false;
+    return true;
+  }), [questionResults, units, errorSubjectId, errorType, onlyUnreviewed]);
+
+  const setResultReviewed = async (result: QuestionResult, reviewed: boolean) => {
+    const correctedAt = reviewed ? new Date().toISOString() : null;
+    const { error } = await supabase.from("question_results").update({ corrected_at: correctedAt }).eq("id", result.id);
+    if (!error) setQuestionResults((rows) => rows.map((row) => row.id === result.id ? { ...row, corrected_at: correctedAt } : row));
+  };
 
   if (loading) {
     return (
@@ -515,6 +598,20 @@ export default function StatsPage() {
 
         {/* 模試の記録 */}
         <Paper variant="outlined" sx={{ p: 2 }}>
+          <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>学習フィードバック</Typography>
+          <Typography fontWeight={700}>復習提案の消化率（直近28日）</Typography>
+          <Typography variant="body2">
+            {reviewCompletion.total >= 5 ? `${reviewCompletion.completed}/${reviewCompletion.total}件（${reviewCompletion.rate}%）` : `集計準備中（${reviewCompletion.total}/5件）`}
+          </Typography>
+          <Typography fontWeight={700} sx={{ mt: 1 }}>科目別の費用対効果</Typography>
+          {efficiencyRows.length === 0 ? <Typography variant="body2">同一主催者の模試2回と、その間の学習記録60分以上が必要です</Typography> : efficiencyRows.map((row, index) => (
+            <Typography key={`${row.subjectId}-${index}`} variant="body2">
+              {subjects.find((subject) => subject.id === row.subjectId)?.name}: 10時間あたり偏差値 {row.perTenHours >= 0 ? "+" : ""}{row.perTenHours.toFixed(1)}（参考値）
+            </Typography>
+          ))}
+        </Paper>
+
+        <Paper variant="outlined" sx={{ p: 2 }}>
           <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1.5 }}>
             模試の記録
           </Typography>
@@ -568,6 +665,24 @@ export default function StatsPage() {
                   );
                 })}
               </Stack>
+              <Box>
+                <Typography fontWeight={700}>志望校判定の推移</Typography>
+                {judgmentSeries.length === 0 ? <Typography variant="body2">同じ志望校の判定が2回以上入ると表示されます</Typography> : judgmentSeries.map(([school, rows]) => (
+                  <Box key={school} sx={{ mt: 0.75 }}>
+                    <Typography variant="body2">{school}</Typography>
+                    <Stack direction="row" spacing={0.5} sx={{ flexWrap: "wrap", rowGap: 0.5 }}>
+                      {rows.map((row) => <Chip key={`${row.date}-${row.judgment}`} size="small" label={`${row.date.slice(5)} ${row.judgment}判定`} />)}
+                    </Stack>
+                  </Box>
+                ))}
+              </Box>
+              {sectionTimings.filter((timing) => timing.actual_seconds != null && timing.target_seconds != null).length >= 2 && <Box>
+                <Typography fontWeight={700}>大問別ペース</Typography>
+                {sectionTimings.filter((timing) => timing.actual_seconds != null && timing.target_seconds != null).map((timing) => {
+                  const diff = timing.actual_seconds! - timing.target_seconds!;
+                  return <Stack key={timing.id} direction="row" spacing={1} alignItems="center"><Typography variant="body2">{timing.section}</Typography><Chip size="small" color={diff <= 0 ? "success" : "warning"} label={diff <= 0 ? `目標内 ${Math.abs(diff)}秒余裕` : `${diff}秒超過`} /></Stack>;
+                })}
+              </Box>}
             </Stack>
           )}
         </Paper>
@@ -582,6 +697,7 @@ export default function StatsPage() {
           >
             <Tab label="レポート" sx={{ minHeight: 36 }} />
             <Tab label="小論文講評" sx={{ minHeight: 36 }} />
+            <Tab label="誤答・要復習" sx={{ minHeight: 36 }} />
           </Tabs>
 
           {tab === 0 && (
@@ -686,6 +802,34 @@ export default function StatsPage() {
                 ))}
               </Stack>
             ))}
+          {tab === 2 && <Stack spacing={1.25}>
+            <Stack direction="row" spacing={1}>
+              <TextField select size="small" label="科目" value={errorSubjectId} onChange={(event) => setErrorSubjectId(event.target.value)} fullWidth>
+                <MenuItem value="">すべて</MenuItem>
+                {subjects.map((subject) => <MenuItem key={subject.id} value={subject.id}>{subject.name}</MenuItem>)}
+              </TextField>
+              <TextField select size="small" label="誤答タイプ" value={errorType} onChange={(event) => setErrorType(event.target.value)} fullWidth>
+                <MenuItem value="">すべて</MenuItem>
+                <MenuItem value="calc">計算</MenuItem><MenuItem value="knowledge">知識</MenuItem><MenuItem value="reading">読解</MenuItem><MenuItem value="logic">論理</MenuItem><MenuItem value="other">その他</MenuItem>
+              </TextField>
+            </Stack>
+            <Button size="small" variant={onlyUnreviewed ? "contained" : "outlined"} onClick={() => setOnlyUnreviewed((value) => !value)}>未復習のみ</Button>
+            {errorRows.length === 0 ? <Typography variant="body2">条件に合う誤答・要復習項目はありません</Typography> : errorRows.map((result) => {
+              const unit = units.find((row) => row.id === result.unit_id);
+              const subjectId = result.subject_id ?? unit?.subject_id;
+              const subject = subjects.find((row) => row.id === subjectId);
+              return <Box key={result.id} sx={{ py: 1, borderBottom: "1px solid", borderColor: "divider" }}>
+                <Stack direction="row" spacing={0.5} alignItems="center" sx={{ flexWrap: "wrap", rowGap: 0.5 }}>
+                  <Chip size="small" label={subject?.name ?? "科目不明"} />
+                  <Typography variant="body2" fontWeight={700}>{unit?.name ?? result.question_label ?? "大問"}</Typography>
+                  <Chip size="small" color="error" label={result.score_rate != null ? `得点率 ${result.score_rate}%` : "誤答"} />
+                  <Chip size="small" variant="outlined" label={SOURCE_LABELS[result.source] ?? result.source} />
+                </Stack>
+                {unit && result.question_label && <Typography variant="caption" color="text.secondary">{result.question_label}</Typography>}
+                <Button size="small" onClick={() => void setResultReviewed(result, !result.corrected_at)}>{result.corrected_at ? "未復習に戻す" : "復習した"}</Button>
+              </Box>;
+            })}
+          </Stack>}
         </Paper>
         {reviewPhotos.length > 0 && (
           <Alert severity="warning">AI判定の確認が必要な写真が{reviewPhotos.length}件あります。単元詳細から設問を修正できます。</Alert>
@@ -734,6 +878,14 @@ function UnitDetailDialog({ unit, snapshots, results, onClose, onCorrect }: {
             <Chip label={latest ? LEARNING_STATE_LABELS[latest.state] : "未診断"} color={latest?.state === "foundation" || latest?.state === "review" ? "warning" : "default"} />
             <Chip label={`正答率 ${latest?.accuracy == null ? "-" : `${Math.round(latest.accuracy * 100)}%`}`} />
           </Stack>
+          <Paper variant="outlined" sx={{ p: 1.25 }}>
+            <Typography variant="subtitle2" fontWeight={700}>復習間隔</Typography>
+            {latest?.stability_days != null && latest.next_review_date ? (
+              <Typography variant="body2">次回 {latest.next_review_date}（{Math.round(latest.stability_days)}日間隔・復習{latest.review_count}回）</Typography>
+            ) : (
+              <Typography variant="body2" color="text.secondary">データ蓄積中です。単元ごとに3回以上、全体で30件以上の評価がそろうと個別の復習間隔を表示します。</Typography>
+            )}
+          </Paper>
           <Box><Typography fontWeight={700}>状態の推移</Typography><Typography variant="body2">{snapshots.length ? snapshots.map((snapshot) => `${snapshot.snapshot_date} ${LEARNING_STATE_LABELS[snapshot.state]}${snapshot.accuracy == null ? "" : ` ${Math.round(snapshot.accuracy * 100)}%`}`).join(" → ") : "まだ履歴がありません"}</Typography></Box>
           <Box><Typography fontWeight={700}>誤答タイプ</Typography><Typography variant="body2">{Object.keys(errorCounts).length ? Object.entries(errorCounts).map(([key, count]) => `${key}: ${count}件`).join(" / ") : "誤答データはありません"}</Typography></Box>
           <Box><Typography fontWeight={700}>最近の設問</Typography><Stack spacing={1}>{results.slice(0, 20).map((result) => (

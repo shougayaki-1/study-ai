@@ -47,6 +47,14 @@ Node標準機能のみで完結する)。
 
 ## 処理フロー
 
+### -1. スキーマの最新化
+
+1. `supabase db push --linked --dry-run` で未適用migrationを確認する。
+2. 差分の有無にかかわらず `supabase db push --linked --yes` を実行し、コミット済みの
+   migrationだけを実DBへ適用する。`supabase/schema.sql` や `seed.sql` を直接実行してはならない。
+3. `node analysis/helpers/check-schema.mjs` を実行する。いずれかが失敗した場合は、写真解析や
+   データ更新を一切始めず、エラーを表示して終了する。
+
 ### 0. 準備
 1. `node analysis/helpers/start-analysis-run.mjs` を実行して返された `id` を保持する。
    以後、レポート保存時の第3引数と、最後の完了更新にこのIDを使う。
@@ -74,8 +82,8 @@ Node標準機能のみで完結する)。
        そのまま `question_label` に使う。
      - **単元の推定**: ページの見出し・問題内容から単元を推定し、
        手順0で取得した単元マスタの中から最も近いものの `unit_id` を選ぶ。
-       確信が持てない場合でも、科目レベルでは合っている単元を選ぶ(unit_idをnullにしない)。
-       どうしても推定不能な場合のみ `unit_id: null` を許容する。
+       根拠が弱い場合は誤った単元を選ばず `unit_id: null` とし、写真に紐づく学習記録の
+       `subject_id` は必ず保存する。
      - **誤答タイプの推定**(✕の設問のみ、`error_type`):
        `calc`(計算ミス)/ `knowledge`(知識不足)/ `reading`(読み取りミス)/
        `logic`(論理・解法の誤り)/ `other`(上記以外・判断不能)。
@@ -86,7 +94,7 @@ Node標準機能のみで完結する)。
      `node analysis/helpers/insert-question-results.mjs '<JSON配列>'` で
      `question_results` に挿入する。各行の形式:
      ```json
-     {"photo_id": "...", "unit_id": "...", "question_label": "大問2(1)", "is_correct": false, "error_type": "calc"}
+    {"photo_id": "...", "subject_id": "...", "unit_id": "...", "question_label": "大問2(1)", "is_correct": false, "error_type": "calc"}
      ```
      挿入後、`node analysis/helpers/mark-photo-status.mjs <photo_id> analyzed '<result_json>'` で
      `photos.status` を `analyzed` にし、`result_json` に読み取り結果のサマリ
@@ -137,6 +145,9 @@ Node標準機能のみで完結する)。
      ```json
      {"photo_id": "...", "unit_id": "...", "question_label": "大問1-3", "is_correct": true, "source": "pdf_mock_exam", "raw_topic_tags": {"level1": "通信文の読解", "level2": "メール", "level3": "内容一致"}, "mock_exam_id": "<上で保持したexam.id>", "confidence": 0.9}
      ```
+   - 大問ごとの「演習時間」と「目標時間」が明記されている場合だけ、秒へ換算して
+     `node analysis/helpers/insert-section-timings.mjs '<JSON配列>'`で保存する。存在しない値を
+     推測してはならない。片方しか読めない場合は読めた値だけ保存し、日次レポートに警告する。
    - 挿入後、`node analysis/helpers/mark-photo-status.mjs <photo_id> analyzed '<result_json>'` で
      `photos.status`を`analyzed`にする。続けて`node analysis/helpers/delete-photo-file.mjs <storage_path>`で
      Storage上のPDF原本を削除する(必要なデータは`mock_exams`/`mock_exam_scores`/`question_results`に
@@ -195,6 +206,10 @@ score = (1 - 直近30件の正答率) × (1 + log(1 + 経過日数) / 2)
    - `undiagnosed` は弱点と呼ばず、2〜3問・15分程度の状況確認を提案する。
    - `foundation` は、同じ単元に関連する一段階易しい教材を優先する。
    - 前日の未完了提案は持ち越さず、最新状態から再評価する。
+   - `evidence_json.unreviewedErrors` が多い単元、または直近7日の未復習大問が多い科目を
+     優先材料にする。単元が不明でも `subject_id` を指定した科目別タスクを作成してよい。
+   - `next_review_date` が今日以前の単元は、弱点スコアが同程度なら先に並べる。
+   - `historical-context.mjs` の `planExecution.proposalCountHint` が3なら、提案を3件に抑える。
 3. 各タスクについて、手順0で取得した教材マスタから該当科目の教材を選び、
    **具体的な範囲**(`range_text`、例:「青チャート 例題40〜43」「Vintage 単語1〜50」)を
    決める。ちょうど良い教材が無ければ `material_id` は null にし、`range_text` は

@@ -13,7 +13,7 @@ const db = restClient();
 const units = await db.select('units', 'select=id,subject_id');
 const results = await db.select(
   'question_results',
-  'select=unit_id,is_correct,created_at&unit_id=not.is.null&order=created_at.desc'
+  'select=unit_id,is_correct,score_rate,created_at&unit_id=not.is.null&order=created_at.desc'
 );
 const sessions = await db.select(
   'study_sessions',
@@ -54,8 +54,9 @@ for (const unit of units) {
   const list = byUnitResults.get(unit.id);
   if (!list || list.length === 0) continue; // データが無い単元はスコア対象外
 
-  const correctCount = list.filter((r) => r.is_correct === true).length;
-  const accuracy = correctCount / list.length;
+  const performances = list.map((row) => row.score_rate != null ? Number(row.score_rate) / 100 : row.is_correct === true ? 1 : row.is_correct === false ? 0 : null).filter((value) => value != null);
+  if (!performances.length) continue;
+  const accuracy = performances.reduce((sum, value) => sum + value, 0) / performances.length;
 
   const lastStudiedAt = lastStudiedByUnit.get(unit.id) || null;
   const elapsedDays = lastStudiedAt

@@ -25,6 +25,7 @@ import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import TodayIcon from "@mui/icons-material/Today";
 import { createClient } from "@/lib/supabase/client";
+import { PhotoUploadPanel } from "@/components/photo-upload-panel";
 import { UNDERSTANDING_LABELS, type Understanding } from "@/lib/learning";
 import { RECORD_TYPE_LABELS, type RecordType } from "@/lib/study-session";
 
@@ -86,7 +87,6 @@ export default function RecordsPage() {
   const [editing, setEditing] = useState<Session | null>(null);
   const [saving, setSaving] = useState(false);
   const [photoSession, setPhotoSession] = useState<Session | null>(null);
-  const [photoKind, setPhotoKind] = useState<"exercise" | "essay" | "pdf_mock_exam" | "pdf_quiz">("exercise");
   const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
@@ -95,7 +95,7 @@ export default function RecordsPage() {
     Promise.all([
       supabase.from("study_sessions").select("id,subject_id,unit_id,material_id,minutes,study_date,understanding,record_type,common_test_year,common_test_section,memo").gte("study_date", since.toISOString().slice(0, 10)).order("study_date", { ascending: false }),
       supabase.from("subjects").select("id,name,color"),
-      supabase.from("units").select("id,name"),
+      supabase.from("units").select("id,name,subject_id"),
       supabase.from("materials").select("id,name"),
       supabase.from("question_results").select("is_correct,created_at").gte("created_at", since.toISOString()),
     ]).then(([s, subjectsResult, unitsResult, materialsResult, questionResult]) => {
@@ -132,7 +132,7 @@ export default function RecordsPage() {
   const correct = recentResults.filter((result) => result.is_correct === true).length;
   const accuracy = recentResults.length ? Math.round(correct / recentResults.length * 100) : null;
   const nameOf = (rows: Named[], id: string | null) => rows.find((row) => row.id === id)?.name;
-  const commonTestLabel = (session: Session) => session.record_type === "common_test" ? `${session.common_test_year ?? "年度未指定"}年度・${session.common_test_section ?? "大問未指定"}` : nameOf(units, session.unit_id) ?? "単元未指定";
+  const commonTestLabel = (session: Session) => session.record_type === "common_test" ? `${session.common_test_year ?? "年度未指定"}年度・${session.common_test_section ?? "年度通し"}` : nameOf(units, session.unit_id) ?? "単元未指定";
 
   const saveEdit = async () => {
     if (!editing || editing.minutes <= 0) return;
@@ -141,12 +141,12 @@ export default function RecordsPage() {
     const { error: updateError } = await supabase.from("study_sessions").update({
       study_date: editing.study_date,
       minutes: editing.minutes,
-      unit_id: editing.record_type === "common_test" ? null : editing.unit_id || null,
+      unit_id: editing.record_type === "common_test" && (!editing.common_test_section || editing.common_test_section === "年度通し") ? null : editing.unit_id || null,
       material_id: editing.material_id || null,
       understanding: editing.understanding,
       record_type: editing.record_type,
       common_test_year: editing.record_type === "common_test" ? editing.common_test_year : null,
-      common_test_section: editing.record_type === "common_test" ? editing.common_test_section : null,
+      common_test_section: editing.record_type === "common_test" && editing.common_test_section !== "年度通し" ? editing.common_test_section : null,
       memo: editing.memo?.trim() || null,
     }).eq("id", editing.id);
     if (updateError) setError(updateError.message);
@@ -163,25 +163,6 @@ export default function RecordsPage() {
     const { error: deleteError } = await supabase.from("study_sessions").delete().eq("id", session.id);
     if (deleteError) setError(deleteError.message);
     else setSessions((current) => current.filter((item) => item.id !== session.id));
-  };
-
-  const uploadPhoto = async (files: FileList | null) => {
-    if (!files?.length || !photoSession) return;
-    setUploading(true);
-    setError(null);
-    try {
-      for (const file of Array.from(files)) {
-        const ext = file.name.split(".").pop() || "jpg";
-        const path = `${photoSession.id}/${Date.now()}-${crypto.randomUUID()}.${ext}`;
-        const { error: storageError } = await supabase.storage.from("photos").upload(path, file);
-        if (storageError) throw storageError;
-        const { error: rowError } = await supabase.from("photos").insert({ session_id: photoSession.id, storage_path: path, kind: photoKind, status: "pending" });
-        if (rowError) throw rowError;
-      }
-      setPhotoSession(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "写真のアップロードに失敗しました。");
-    } finally { setUploading(false); }
   };
 
   if (loading) return <Box sx={{ p: 4, textAlign: "center" }}><CircularProgress /></Box>;
@@ -233,7 +214,7 @@ export default function RecordsPage() {
           <TextField label="記録日" type="date" value={editing.study_date} onChange={(event) => setEditing({ ...editing, study_date: event.target.value })} slotProps={{ inputLabel: { shrink: true } }} fullWidth />
           <TextField label="学習時間（分）" type="number" value={editing.minutes} onChange={(event) => setEditing({ ...editing, minutes: Math.max(1, Number(event.target.value)) })} fullWidth />
           <TextField select label="演習区分" value={editing.record_type} onChange={(event) => setEditing({ ...editing, record_type: event.target.value as RecordType })} fullWidth>{Object.entries(RECORD_TYPE_LABELS).map(([value, label]) => <MenuItem key={value} value={value}>{label}</MenuItem>)}</TextField>
-          {editing.record_type === "common_test" ? <Stack direction="row" spacing={1}><TextField label="年度" type="number" value={editing.common_test_year ?? ""} onChange={(event) => setEditing({ ...editing, common_test_year: Number(event.target.value) || null })} fullWidth /><TextField select label="大問" value={editing.common_test_section ?? "年度通し"} onChange={(event) => setEditing({ ...editing, common_test_section: event.target.value })} fullWidth>{COMMON_TEST_SECTIONS.map((section) => <MenuItem key={section} value={section}>{section}</MenuItem>)}</TextField></Stack> : <TextField select label="単元" value={editing.unit_id ?? ""} onChange={(event) => setEditing({ ...editing, unit_id: event.target.value || null })} fullWidth><MenuItem value="">未指定</MenuItem>{units.filter((unit) => unit.subject_id === editing.subject_id).map((unit) => <MenuItem key={unit.id} value={unit.id}>{unit.name}</MenuItem>)}</TextField>}
+          {editing.record_type === "common_test" ? <Stack spacing={1}><Stack direction="row" spacing={1}><TextField label="年度" type="number" value={editing.common_test_year ?? ""} onChange={(event) => setEditing({ ...editing, common_test_year: Number(event.target.value) || null })} fullWidth /><TextField select label="範囲" value={editing.common_test_section ?? "年度通し"} onChange={(event) => setEditing({ ...editing, common_test_section: event.target.value, unit_id: event.target.value === "年度通し" ? null : editing.unit_id })} fullWidth>{COMMON_TEST_SECTIONS.map((section) => <MenuItem key={section} value={section}>{section}</MenuItem>)}</TextField></Stack>{editing.common_test_section && editing.common_test_section !== "年度通し" && <TextField select label="単元（変更可）" value={editing.unit_id ?? ""} onChange={(event) => setEditing({ ...editing, unit_id: event.target.value || null })} fullWidth><MenuItem value="">未指定</MenuItem>{units.filter((unit) => unit.subject_id === editing.subject_id).map((unit) => <MenuItem key={unit.id} value={unit.id}>{unit.name}</MenuItem>)}</TextField>}</Stack> : <TextField select label="単元" value={editing.unit_id ?? ""} onChange={(event) => setEditing({ ...editing, unit_id: event.target.value || null })} fullWidth><MenuItem value="">未指定</MenuItem>{units.filter((unit) => unit.subject_id === editing.subject_id).map((unit) => <MenuItem key={unit.id} value={unit.id}>{unit.name}</MenuItem>)}</TextField>}
           <TextField select label="教材" value={editing.material_id ?? ""} onChange={(event) => setEditing({ ...editing, material_id: event.target.value || null })} fullWidth><MenuItem value="">未指定</MenuItem>{materials.map((material) => <MenuItem key={material.id} value={material.id}>{material.name}</MenuItem>)}</TextField>
           <TextField select label="理解度" value={editing.understanding ?? ""} onChange={(event) => setEditing({ ...editing, understanding: (event.target.value || null) as Understanding | null })} fullWidth><MenuItem value="">未指定</MenuItem>{Object.entries(UNDERSTANDING_LABELS).map(([value, label]) => <MenuItem key={value} value={value}>{label}</MenuItem>)}</TextField>
           <TextField label="コメント・メモ" value={editing.memo ?? ""} onChange={(event) => setEditing({ ...editing, memo: event.target.value })} multiline minRows={2} fullWidth />
@@ -244,19 +225,10 @@ export default function RecordsPage() {
         <DialogTitle>あとから写真・PDFを追加</DialogTitle>
         <DialogContent>
           <Typography variant="body2" sx={{ mb: 1.5 }}>{photoSession?.study_date}の記録に、丸付け済みの写真やPDFを追加します。</Typography>
-          <ToggleButtonGroup exclusive value={photoKind} onChange={(_, value) => value && setPhotoKind(value)} size="small" sx={{ flexWrap: "wrap" }}>
-            <ToggleButton value="exercise">演習写真</ToggleButton>
-            <ToggleButton value="essay">小論文写真</ToggleButton>
-            <ToggleButton value="pdf_mock_exam">模試PDF</ToggleButton>
-            <ToggleButton value="pdf_quiz">演習解説PDF</ToggleButton>
-          </ToggleButtonGroup>
+          {photoSession && <PhotoUploadPanel sessionId={photoSession.id} onBusyChange={setUploading} />}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setPhotoSession(null)} disabled={uploading}>キャンセル</Button>
-          <Button component="label" variant="contained" disabled={uploading}>
-            {uploading ? "アップロード中..." : photoKind.startsWith("pdf") ? "PDFを選ぶ" : "写真を選ぶ"}
-            <input hidden multiple accept={photoKind.startsWith("pdf") ? "application/pdf" : "image/*"} type="file" onChange={(event) => uploadPhoto(event.target.files)} />
-          </Button>
+          <Button onClick={() => setPhotoSession(null)} disabled={uploading}>閉じる</Button>
         </DialogActions>
       </Dialog>
     </Box>

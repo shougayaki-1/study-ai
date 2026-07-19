@@ -236,6 +236,15 @@ export default function SchedulePage() {
     () => planBlocks.filter((row) => row.plan_date === selectedDate).sort((a, b) => a.start_time.localeCompare(b.start_time)),
     [planBlocks, selectedDate],
   );
+  const planExecution = useMemo(() => {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - 28);
+    const cutoffKey = cutoff.toISOString().slice(0, 10);
+    const today = todayStr();
+    const matured = planBlocks.filter((row) => row.plan_date >= cutoffKey && row.plan_date < today);
+    const done = matured.filter((row) => row.status === "done").length;
+    return { total: matured.length, done, linked: matured.filter((row) => row.linked_session_batch_id).length, rate: matured.length ? Math.round(done / matured.length * 100) : null };
+  }, [planBlocks]);
 
   const loadEvents = async () => {
     try {
@@ -409,6 +418,13 @@ export default function SchedulePage() {
 
       {view === "plan" && (
         <Stack spacing={2}>
+          <Paper variant="outlined" sx={{ p: 2 }}>
+            <Typography variant="subtitle2" color="text.secondary">直近28日の計画実行率</Typography>
+            {planExecution.total >= 5 ? <>
+              <Typography variant="h5" fontWeight={700}>{planExecution.rate}%</Typography>
+              <Typography variant="caption">{planExecution.done}/{planExecution.total}ブロック完了・記録連携{planExecution.linked}件</Typography>
+            </> : <Typography variant="body2">集計準備中（{planExecution.total}/5ブロック）</Typography>}
+          </Paper>
           <Paper variant="outlined" sx={{ p: 2 }}>
             <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
               <IconButton size="small" onClick={() => setSelectedDate((d) => addDaysStr(d, -1))}>
