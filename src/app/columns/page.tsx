@@ -12,7 +12,8 @@ import IconButton from "@mui/material/IconButton";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { createClient } from "@/lib/supabase/client";
+import { useSupabase } from "@/lib/supabase/use-client";
+import { throwIfSupabaseError } from "@/lib/supabase/error";
 
 export const dynamic = "force-dynamic";
 
@@ -45,7 +46,7 @@ function ColumnMarkdown({ text }: { text: string }) {
 }
 
 export default function ColumnsPage() {
-  const supabase = createClient();
+  const supabase = useSupabase();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [subjects, setSubjects] = useState<Subject[]>([]);
@@ -70,8 +71,7 @@ export default function ColumnsPage() {
       setLoading(false);
     });
     return () => { active = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [supabase]);
 
   const filtered = useMemo(
     () => (subjectFilter ? columns.filter((c) => c.subject_id === subjectFilter) : columns),
@@ -88,7 +88,13 @@ export default function ColumnsPage() {
     if (!column.read_at) {
       const readAt = new Date().toISOString();
       setColumns((rows) => rows.map((row) => row.id === column.id ? { ...row, read_at: readAt } : row));
-      await supabase.from("knowledge_columns").update({ read_at: readAt }).eq("id", column.id);
+      const { error } = await supabase.from("knowledge_columns").update({ read_at: readAt }).eq("id", column.id);
+      try {
+        throwIfSupabaseError(error);
+      } catch {
+        setColumns((rows) => rows.map((row) => row.id === column.id ? { ...row, read_at: null } : row));
+        setError("既読状態を保存できませんでした。");
+      }
     }
   };
 

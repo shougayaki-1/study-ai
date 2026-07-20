@@ -12,6 +12,9 @@
 
 # testing
 /coverage
+/playwright-report/
+/test-results/
+/playwright/.auth/
 
 # next.js
 /.next/
@@ -50,6 +53,9 @@ analysis/menubar-app/dist/
 
 # vercel
 .vercel
+
+# supabase local CLI state
+/supabase/.branches/
 
 # typescript
 *.tsbuildinfo

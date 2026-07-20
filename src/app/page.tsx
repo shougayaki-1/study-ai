@@ -11,8 +11,10 @@ import Checkbox from "@mui/material/Checkbox";
 import CircularProgress from "@mui/material/CircularProgress";
 import Alert from "@mui/material/Alert";
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/client";
+import { useSupabase } from "@/lib/supabase/use-client";
 import { COMMON_TEST_DATE, daysUntil, EVENT_KIND_LABELS } from "@/lib/constants";
+import { formatLocalDate } from "@/lib/date";
+import { throwIfSupabaseError } from "@/lib/supabase/error";
 
 export const dynamic = "force-dynamic";
 
@@ -46,7 +48,7 @@ type Report = {
 };
 
 export default function HomePage() {
-  const supabase = createClient();
+  const supabase = useSupabase();
   const [loading, setLoading] = useState(true);
   const [configError, setConfigError] = useState<string | null>(null);
 
@@ -61,7 +63,7 @@ export default function HomePage() {
     let active = true;
     async function load() {
       try {
-        const today = new Date().toISOString().slice(0, 10);
+        const today = formatLocalDate(new Date());
         const [eventsRes, tasksRes, reportRes] = await Promise.all([
           supabase
             .from("events")
@@ -107,20 +109,22 @@ export default function HomePage() {
     return () => {
       active = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [supabase]);
 
   const toggleTask = async (task: ReviewTask) => {
+    const previous = task.done;
     setTasks((prev) =>
-      prev.map((t) => (t.id === task.id ? { ...t, done: !t.done } : t)),
+      prev.map((t) => (t.id === task.id ? { ...t, done: !previous } : t)),
     );
     try {
-      await supabase
+      const { error } = await supabase
         .from("review_tasks")
-        .update({ done: !task.done, status: !task.done ? "completed" : "pending", completed_at: !task.done ? new Date().toISOString() : null })
+        .update({ done: !previous, status: !previous ? "completed" : "pending", completed_at: !previous ? new Date().toISOString() : null })
         .eq("id", task.id);
-    } catch {
-      // 楽観更新のロールバックは省略(次回読み込みで整合)
+      throwIfSupabaseError(error);
+    } catch (error) {
+      setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, done: previous } : t)));
+      setConfigError(error instanceof Error ? error.message : "復習タスクを更新できませんでした。");
     }
   };
 

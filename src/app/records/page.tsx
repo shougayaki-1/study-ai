@@ -24,10 +24,11 @@ import PhotoCameraIcon from "@mui/icons-material/PhotoCamera";
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import TodayIcon from "@mui/icons-material/Today";
-import { createClient } from "@/lib/supabase/client";
+import { useSupabase } from "@/lib/supabase/use-client";
 import { PhotoUploadPanel } from "@/components/photo-upload-panel";
 import { UNDERSTANDING_LABELS, type Understanding } from "@/lib/learning";
 import { RECORD_TYPE_LABELS, type RecordType } from "@/lib/study-session";
+import { formatLocalDate, parseLocalDate as parseDateKey } from "@/lib/date";
 
 type Session = {
   id: string; subject_id: string; unit_id: string | null; material_id: string | null;
@@ -41,11 +42,10 @@ type PeriodMode = "day" | "week" | "month";
 const COMMON_TEST_SECTIONS = ["年度通し", ...Array.from({ length: 8 }, (_, index) => `大問${index + 1}`)];
 
 function localDateString(date: Date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  return formatLocalDate(date);
 }
 function parseLocalDate(value: string) {
-  const [year, month, day] = value.split("-").map(Number);
-  return new Date(year, month - 1, day);
+  return parseDateKey(value);
 }
 function rangeFor(mode: PeriodMode, refDate: string) {
   const ref = parseLocalDate(refDate);
@@ -74,7 +74,7 @@ function formatRangeLabel(mode: PeriodMode, start: Date, end: Date) {
 }
 
 export default function RecordsPage() {
-  const supabase = createClient();
+  const supabase = useSupabase();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -93,7 +93,7 @@ export default function RecordsPage() {
     const since = new Date();
     since.setDate(since.getDate() - 400);
     Promise.all([
-      supabase.from("study_sessions").select("id,subject_id,unit_id,material_id,minutes,study_date,understanding,record_type,common_test_year,common_test_section,memo").gte("study_date", since.toISOString().slice(0, 10)).order("study_date", { ascending: false }),
+      supabase.from("study_sessions").select("id,subject_id,unit_id,material_id,minutes,study_date,understanding,record_type,common_test_year,common_test_section,memo").gte("study_date", formatLocalDate(since)).order("study_date", { ascending: false }),
       supabase.from("subjects").select("id,name,color"),
       supabase.from("units").select("id,name,subject_id"),
       supabase.from("materials").select("id,name"),
@@ -108,8 +108,7 @@ export default function RecordsPage() {
       setResults((questionResult.data ?? []) as Result[]);
       setLoading(false);
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [supabase]);
 
   const { start: rangeStart, end: rangeEnd } = useMemo(() => rangeFor(mode, refDate), [mode, refDate]);
   const startKey = localDateString(rangeStart);

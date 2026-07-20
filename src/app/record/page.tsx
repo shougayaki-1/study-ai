@@ -17,7 +17,7 @@ import Chip from "@mui/material/Chip";
 import CircularProgress from "@mui/material/CircularProgress";
 import AddIcon from "@mui/icons-material/Add";
 import DeleteIcon from "@mui/icons-material/Delete";
-import { createClient } from "@/lib/supabase/client";
+import { useSupabase } from "@/lib/supabase/use-client";
 import { PhotoUploadPanel } from "@/components/photo-upload-panel";
 import { RECORD_TYPES, type RecordType } from "@/lib/study-session";
 import {
@@ -101,7 +101,7 @@ export default function RecordPage() {
 }
 
 function RecordPageInner() {
-  const supabase = createClient();
+  const supabase = useSupabase();
   const searchParams = useSearchParams();
   const planBlockId = searchParams.get("planBlockId");
   const [loading, setLoading] = useState(true);
@@ -163,8 +163,7 @@ function RecordPageInner() {
       setLoading(false);
     });
     return () => { active = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [planBlockId, searchParams, supabase]);
 
   const previousByUnit = useMemo(() => {
     const map = new Map<string, Understanding>();
@@ -219,7 +218,6 @@ function RecordPageInner() {
     }
     setSaving(true);
     setError(null);
-    const batchId = crypto.randomUUID();
     const rows = entries.map((entry) => ({
       subject_id: entry.subjectId,
       unit_id: entry.unitId || null,
@@ -233,35 +231,30 @@ function RecordPageInner() {
       memo: entry.memo.trim() || null,
       range_text: entry.rangeText.trim() || null,
       topic_tag: entry.topicTag.trim() || null,
-      batch_id: batchId,
     }));
-    const { data, error: insertError } = await supabase
-      .from("study_sessions")
-      .insert(rows)
-      .select("id");
+    const usedTags = [...new Map(entries
+      .map((entry) => ({ subject_id: entry.subjectId, name: entry.topicTag.trim() }))
+      .filter((tag) => tag.name)
+      .map((tag) => [`${tag.subject_id}:${tag.name}`, tag])).values()];
+    const { data: batchId, error: insertError } = await supabase.rpc("create_study_session_batch", {
+      p_sessions: rows,
+      p_topic_tags: usedTags,
+      p_plan_block_id: planBlockId ?? "",
+    });
     if (insertError) {
       setError(insertError.message);
       setSaving(false);
       return;
     }
-
-    const usedTags = new Map<string, string>();
-    entries.forEach((entry) => {
-      const name = entry.topicTag.trim();
-      if (name) usedTags.set(`${entry.subjectId}:${name}`, name);
-    });
-    for (const [key, name] of usedTags) {
-      const subjectId = key.split(":")[0];
-      const existing = topicTags.find((tag) => tag.subject_id === subjectId && tag.name === name);
-      if (existing) {
-        await supabase.from("topic_tags").update({ usage_count: existing.usage_count + 1 }).eq("id", existing.id);
-      } else {
-        await supabase.from("topic_tags").insert({ subject_id: subjectId, name, usage_count: 1 });
-      }
-    }
-
-    if (planBlockId) {
-      await supabase.from("plan_blocks").update({ status: "done", linked_session_batch_id: batchId }).eq("id", planBlockId);
+    const { data: firstSession, error: firstSessionError } = await supabase
+      .from("study_sessions")
+      .select("id")
+      .eq("batch_id", batchId)
+      .order("created_at")
+      .limit(1)
+      .maybeSingle();
+    if (firstSessionError) {
+      setError(`記録は保存されましたが、写真追加用の記録を取得できませんでした: ${firstSessionError.message}`);
     }
 
     const bySubject = new Map<string, number>();
@@ -287,7 +280,7 @@ function RecordPageInner() {
       progress,
       challenges,
       nextStep: nextUnit ? `${nextUnit}を明日最初に15分確認する` : "今日できた内容を明日もう一度短く確認する",
-      firstSessionId: (data?.[0]?.id as string | undefined) ?? null,
+      firstSessionId: firstSession?.id ?? null,
     });
     setSaving(false);
   };

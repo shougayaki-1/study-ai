@@ -1,4 +1,6 @@
--- 参照用スキーマスナップショット。変更の正本は supabase/migrations/。
+-- Reproducible baseline for environments that predate migration tracking.
+-- Existing linked environments must mark this version applied after confirming
+-- an empty supabase db diff --linked; do not execute it against production.
 -- study-ai データベーススキーマ
 -- DESIGN.md セクション4に基づく。シングルユーザー(受験生本人)専用。
 -- Supabase SQL Editor で実行するか `supabase db push` を利用する。
@@ -531,3 +533,4 @@ create policy "authenticated_all_photos_storage" on storage.objects
   to authenticated
   using (bucket_id = 'photos')
   with check (bucket_id = 'photos');
+

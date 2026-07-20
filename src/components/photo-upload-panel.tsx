@@ -86,7 +86,6 @@ export function PhotoUploadPanel({
   }, [sessionId, supabase]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadPhotos();
   }, [loadPhotos]);
 

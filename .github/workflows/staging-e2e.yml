@@ -1,0 +1,38 @@
+name: staging-e2e
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: Vercel Preview URL connected to staging Supabase
+        required: true
+        type: string
+
+jobs:
+  verify:
+    environment: staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PLAYWRIGHT_BASE_URL: ${{ inputs.base_url }}
+      PLAYWRIGHT_SKIP_WEBSERVER: "1"
+      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.STAGING_SUPABASE_ANON_KEY }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.STAGING_SUPABASE_SERVICE_ROLE_KEY }}
+      E2E_USER_EMAIL: ${{ secrets.STAGING_E2E_USER_EMAIL }}
+      E2E_USER_PASSWORD: ${{ secrets.STAGING_E2E_USER_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: staging-playwright-report
+          path: playwright-report/
+          retention-days: 7

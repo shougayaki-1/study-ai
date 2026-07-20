@@ -2,7 +2,7 @@
 
 受験生向け学習管理Webアプリ。設計仕様は [`docs/DESIGN.md`](./docs/DESIGN.md) を参照。
 
-## セットアップ(フェーズ1)
+## セットアップ
 
 ```bash
 npm install
@@ -13,22 +13,43 @@ npm run dev
 
 Supabase側のセットアップ:
 
-1. Supabaseプロジェクトを作成
-2. SQL Editor で `supabase/schema.sql` → `supabase/seed.sql` の順に実行
-3. Authでユーザーを1件作成(サインアップ画面は無し。本人専用)
-4. Storageに `photos` バケットが `schema.sql` 実行時に自動作成される(private)
+1. Dockerを起動
+2. `supabase start`
+3. `supabase db reset --local` でマイグレーションとseedを適用
+4. `supabase status -o env` のURL・キーを `.env.local` に設定
+
+`supabase/migrations/` がスキーマの正本です。`supabase/schema.sql` は既存環境参照用の
+スナップショットであり、新しい変更を直接追加しません。
 
 `.env.local` が未設定でも `npm run build` は通るようにしてあるが、実際のログイン・データ取得にはSupabaseの接続情報が必須。
 
-## 現在の実装状況(フェーズ1: 基盤)
+## 品質検査
+
+```bash
+npm run lint
+npm run audit:prod
+npx tsc --noEmit
+npm test
+npm run test:analysis
+npm run build
+npm run types:check       # ローカルSupabase起動中に実行
+npm run test:e2e          # ローカルSupabaseの環境変数が必要
+```
+
+GitHub Actionsでも同じ検査、空DBからのマイグレーション、Playwright E2Eを実行する。
+staging・本番への適用順は [`docs/stability-rollout.md`](./docs/stability-rollout.md) を参照。
+
+## 実装状況
 
 - Next.js 15 (App Router / TypeScript) + MUI(ライトテーマ固定・ミニマル)
 - 下部固定タブ5つ: 今日(`/`) / 記録(`/record`) / 分析(`/stats`) / 予定(`/schedule`) / 設定(`/settings`)
-- `/record` のみ完全実装(科目→単元→教材→時間 or タイマーで2〜3タップ保存、写真複数枚アップロード)
+- 今日・記録・履歴・分析・予定・設定の主要画面を実装
+- 学習記録・予定・教材単元対応はDB関数で原子的に保存
+- ローカルDB再構築、型生成一致、ユニットテスト、Playwright E2E、CIを整備
 - Supabase Auth(メールログイン、`/login`)+ middleware による未認証リダイレクト
 - `supabase/schema.sql` / `supabase/seed.sql`(科目13 + 単元マスタ)
 
-## PWA / Web Push / Vercel Cron(フェーズ4)
+## PWA / Web Push / Vercel Cron
 
 ### VAPID鍵の生成
 
@@ -52,13 +73,13 @@ npx web-push generate-vapid-keys --json
    |---|---|
    | `NEXT_PUBLIC_SUPABASE_URL` | Supabase接続 |
    | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase接続(クライアント) |
-   | `SUPABASE_SERVICE_ROLE_KEY` | Cron API(`/api/cron/morning`)がRLSを越えて全購読者へPushするため |
+   | `SUPABASE_SERVICE_ROLE_KEY` | Cron APIがRLSを越えてPush購読・予定・復習提案を読み書きするため |
    | `NEXT_PUBLIC_VAPID_PUBLIC_KEY` | Web Push購読(クライアント) |
    | `VAPID_PRIVATE_KEY` | Web Push送信(サーバー) |
-   | `CRON_SECRET` | `/api/cron/morning` の認証用(`vercel.json` のCronは自動でこのヘッダを付与しないため、下記の通り確認すること) |
+   | `CRON_SECRET` | Cron APIの認証用。16文字以上のランダム値を設定する |
 
-3. デプロイ後、`vercel.json` の `crons` 設定により毎朝 6:30 JST(UTC 21:30)に `/api/cron/morning` が自動実行される(Vercel無料枠は1日1回までのため1本のみ設定)
-4. Vercel CronはデフォルトでVercel自身が `Authorization: Bearer $CRON_SECRET` を付与して呼び出す(Vercelの仕様に準拠。Vercelダッシュボードの Cron Jobs 画面で実行ログを確認できる)
+3. デプロイ後、`vercel.json` の3つのCron（朝の提案、夜2回の記録リマインド）が毎日実行される。Vercel Hobbyでは各Cronは1日1回までで、実行時刻は指定した時間帯の中で前後する。
+4. Vercel Cronは `Authorization: Bearer $CRON_SECRET` を自動付与する。Vercelダッシュボードの Cron Jobs 画面で実行ログを確認する。
 
 ### iPhoneでの利用手順
 
@@ -66,12 +87,11 @@ npx web-push generate-vapid-keys --json
 2. 共有ボタン →「ホーム画面に追加」
 3. ホーム画面のアイコンからアプリを起動(standaloneモードになる)
 4. 「設定」タブの通知トグルをONにし、通知を許可する
-5. 以降、毎朝6:30頃に締切リマインドと復習提案のPush通知が届く
+5. 以降、朝の締切・復習提案と、夜の記録リマインドが届く
 
 注意: iOSではホーム画面に追加したPWAでのみWeb Pushが利用可能(Safariのタブ上では通知を受け取れない)。
 
-## 次フェーズへの申し送り
+## デプロイ前の残確認
 
-- `analysis/`(夜間バッチのClaude Codeプロンプト・実行スクリプト)は未着手
-- Supabase実環境が未接続(ダミーURL/キーでフォールバックしてビルドのみ通す実装)。実運用前に `.env.local` の設定と動作確認が必要
-- Push通知の実機検証(iPhoneでのホーム画面追加→購読→Cron経由の受信)は未実施。デプロイ後に確認すること
+- stagingのSupabaseとPreview環境で、[リリース手順](./docs/stability-rollout.md) に従って書き込みE2Eを実行する
+- 本番でのPush通知実機検証（ホーム画面への追加、購読、Cron経由の受信）を行う

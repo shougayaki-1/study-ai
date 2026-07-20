@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import webpush from "web-push";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { formatDateInTimeZone } from "@/lib/date";
 
 export const dynamic = "force-dynamic";
 
 type Subscription = { id: string; endpoint: string; keys_json: { p256dh: string; auth: string } };
 
 function jstDate() {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  return formatDateInTimeZone(new Date());
 }
 
 export async function GET(request: NextRequest) {

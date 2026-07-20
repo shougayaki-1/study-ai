@@ -21,9 +21,12 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import Link from "next/link";
 import ArrowForwardIcon from "@mui/icons-material/ArrowForward";
-import { createClient } from "@/lib/supabase/client";
+import { useSupabase } from "@/lib/supabase/use-client";
 import { LEARNING_STATE_LABELS, type LearningState, type Understanding } from "@/lib/learning";
 import { startOfWeekDate } from "@/lib/learning";
+import { formatLocalDate } from "@/lib/date";
+import { buildWeeklyStudySeries } from "@/lib/study-metrics";
+import { throwIfSupabaseError } from "@/lib/supabase/error";
 
 export const dynamic = "force-dynamic";
 
@@ -97,21 +100,13 @@ function heatColor(score: number, max: number) {
 }
 
 function localDateStr(d: Date) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return formatLocalDate(d);
 }
 
 function shiftMonth(yearMonth: string, delta: number) {
   const [y, m] = yearMonth.split("-").map(Number);
   const d = new Date(y, m - 1 + delta, 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-}
-
-function startOfWeek(d: Date) {
-  const date = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-  const day = date.getDay();
-  const diff = (day + 6) % 7; // 月曜始まり
-  date.setDate(date.getDate() - diff);
-  return date;
 }
 
 function fmtWeekLabel(d: Date) {
@@ -127,7 +122,7 @@ function SimpleMarkdown({ text }: { text: string }) {
 }
 
 export default function StatsPage() {
-  const supabase = createClient();
+  const supabase = useSupabase();
   const [loading, setLoading] = useState(true);
   const [configError, setConfigError] = useState<string | null>(null);
 
@@ -149,7 +144,7 @@ export default function StatsPage() {
   const [weeklyMinutes, setWeeklyMinutes] = useState<number | null>(null);
   const [tab, setTab] = useState(0);
   const [unreadColumnsCount, setUnreadColumnsCount] = useState(0);
-  const [reportDate, setReportDate] = useState(() => localDateStr(new Date()));
+  const [reportDate, setReportDate] = useState<string>(() => localDateStr(new Date()));
   const [calendarMonth, setCalendarMonth] = useState(() => localDateStr(new Date()).slice(0, 7));
   const [errorSubjectId, setErrorSubjectId] = useState("");
   const [errorType, setErrorType] = useState("");
@@ -242,8 +237,7 @@ export default function StatsPage() {
     return () => {
       active = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [supabase]);
 
   const weaknessByUnit = useMemo(() => {
     const map = new Map<string, WeaknessScore>();
@@ -314,30 +308,12 @@ export default function StatsPage() {
 
   // 週別×科目別の勉強時間集計
   const { weekLabels, chartData, maxMinutes } = useMemo(() => {
-    const weeks: string[] = [];
-    const weekKeys: string[] = [];
-    const now = new Date();
-    for (let i = 7; i >= 0; i--) {
-      const d = startOfWeek(new Date(now.getTime()));
-      d.setDate(d.getDate() - i * 7);
-      weekKeys.push(d.toISOString().slice(0, 10));
-      weeks.push(fmtWeekLabel(d));
-    }
-    const totals: Record<string, Record<string, number>> = {};
-    weekKeys.forEach((wk) => (totals[wk] = {}));
-    sessions.forEach((s) => {
-      const wkStart = startOfWeek(new Date(s.started_at)).toISOString().slice(0, 10);
-      if (!totals[wkStart]) return;
-      totals[wkStart][s.subject_id] = (totals[wkStart][s.subject_id] ?? 0) + s.minutes;
-    });
-    let max = 0;
-    const data = weekKeys.map((wk) => {
-      const bySubject = totals[wk];
-      const total = Object.values(bySubject).reduce((a, b) => a + b, 0);
-      max = Math.max(max, total);
-      return { weekKey: wk, bySubject, total };
-    });
-    return { weekLabels: weeks, chartData: data, maxMinutes: max };
+    const series = buildWeeklyStudySeries(sessions);
+    return {
+      weekLabels: series.weekKeys.map((key) => fmtWeekLabel(new Date(`${key}T00:00:00`))),
+      chartData: series.data,
+      maxMinutes: series.maxMinutes,
+    };
   }, [sessions]);
 
   const mockExamDeviationSeries = useMemo(() => {
@@ -405,7 +381,11 @@ export default function StatsPage() {
   const setResultReviewed = async (result: QuestionResult, reviewed: boolean) => {
     const correctedAt = reviewed ? new Date().toISOString() : null;
     const { error } = await supabase.from("question_results").update({ corrected_at: correctedAt }).eq("id", result.id);
-    if (!error) setQuestionResults((rows) => rows.map((row) => row.id === result.id ? { ...row, corrected_at: correctedAt } : row));
+    if (error) {
+      setConfigError(error.message);
+      return;
+    }
+    setQuestionResults((rows) => rows.map((row) => row.id === result.id ? { ...row, corrected_at: correctedAt } : row));
   };
 
   if (loading) {
@@ -435,9 +415,14 @@ export default function StatsPage() {
           <Stack direction="row" spacing={1} alignItems="center">
             <TextField type="number" size="small" label="週合計（分）" value={weeklyMinutes ?? estimatedWeeklyMinutes} onChange={(event) => setWeeklyMinutes(Number(event.target.value))} slotProps={{ htmlInput: { step: 30, min: 0 } }} />
             <Button variant="contained" onClick={async () => {
-              const value = weeklyMinutes ?? estimatedWeeklyMinutes;
-              const next = new Date(); next.setDate(next.getDate() + 7);
-              await supabase.from("weekly_plans").upsert({ week_start: startOfWeekDate(next), estimated_minutes: estimatedWeeklyMinutes, adjusted_minutes: value, updated_at: new Date().toISOString() }, { onConflict: "week_start" });
+              try {
+                const value = weeklyMinutes ?? estimatedWeeklyMinutes;
+                const next = new Date(); next.setDate(next.getDate() + 7);
+                const { error } = await supabase.from("weekly_plans").upsert({ week_start: startOfWeekDate(next), estimated_minutes: estimatedWeeklyMinutes, adjusted_minutes: value, updated_at: new Date().toISOString() }, { onConflict: "week_start" });
+                throwIfSupabaseError(error);
+              } catch (error) {
+                setConfigError(error instanceof Error ? error.message : "週の学習時間を保存できませんでした。");
+              }
             }}>保存</Button>
           </Stack>
         </Paper>
@@ -846,10 +831,11 @@ export default function StatsPage() {
             const nextRows = questionResults.map((row) => row.id === result.id ? { ...row, ...patch, confidence: 1 } : row);
             setQuestionResults(nextRows);
             if (!nextRows.some((row) => row.photo_id === result.photo_id && (row.confidence ?? 1) < 0.7)) {
-              await supabase.from("photos").update({ needs_review: false, confidence: 1 }).eq("id", result.photo_id);
-              setReviewPhotos((rows) => rows.filter((photo) => photo.id !== result.photo_id));
+              const { error: photoError } = await supabase.from("photos").update({ needs_review: false, confidence: 1 }).eq("id", result.photo_id);
+              if (!photoError) setReviewPhotos((rows) => rows.filter((photo) => photo.id !== result.photo_id));
+              else setConfigError(photoError.message);
             }
-          }
+          } else setConfigError(error.message);
         }}
       />
     </Box>

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import webpush from "web-push";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { addDays, formatDateInTimeZone } from "@/lib/date";
 
 export const dynamic = "force-dynamic";
 
@@ -11,13 +12,7 @@ type PushSubscriptionRow = {
 };
 
 function todayStr() {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function addDays(dateStr: string, days: number) {
-  const d = new Date(`${dateStr}T00:00:00`);
-  d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
+  return formatDateInTimeZone(new Date());
 }
 
 // Vercel Cron(毎朝6:30 JST)から呼ばれる。

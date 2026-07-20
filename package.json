@@ -7,7 +7,15 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:analysis": "node --test analysis/menubar-app/test/*.test.js analysis/test/*.test.mjs"
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:analysis": "node --test analysis/menubar-app/test/*.test.js analysis/test/*.test.mjs",
+    "test:e2e": "playwright test",
+    "audit:prod": "npm audit --omit=dev --audit-level=high",
+    "db:start": "supabase start",
+    "db:reset": "supabase db reset --local",
+    "types:generate": "supabase gen types typescript --local --schema public | sed '/^Connecting to db /d' | perl -0pe 's/\\n+\\z/\\n/' > src/lib/supabase/types.ts",
+    "types:check": "supabase gen types typescript --local --schema public | sed '/^Connecting to db /d' | perl -0pe 's/\\n+\\z/\\n/' > /tmp/study-ai-database.types.ts && diff -u src/lib/supabase/types.ts /tmp/study-ai-database.types.ts"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",
@@ -26,11 +34,17 @@
     "web-push": "^3.6.7"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.0",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@vitest/coverage-v8": "^4.1.6",
     "eslint": "^9",
-    "eslint-config-next": "16.2.10",
-    "typescript": "^5"
+    "eslint-config-next": "^15.5.20",
+    "typescript": "^5",
+    "vitest": "^4.1.6"
+  },
+  "overrides": {
+    "postcss": "^8.5.10"
   }
 }

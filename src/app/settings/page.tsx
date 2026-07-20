@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
 import Paper from "@mui/material/Paper";
@@ -29,9 +29,10 @@ import LogoutIcon from "@mui/icons-material/Logout";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import ArrowUpwardIcon from "@mui/icons-material/ArrowUpward";
 import ArrowDownwardIcon from "@mui/icons-material/ArrowDownward";
-import { createClient } from "@/lib/supabase/client";
+import { useSupabase } from "@/lib/supabase/use-client";
 import { MATERIAL_KINDS } from "@/lib/constants";
 import { isPushSupported, urlBase64ToUint8Array } from "@/lib/push";
+import { throwIfSupabaseError } from "@/lib/supabase/error";
 
 export const dynamic = "force-dynamic";
 
@@ -49,7 +50,7 @@ type Material = { id: string; subject_id: string; name: string; kind: string; di
 const DIFFICULTIES = [["basic", "基礎"], ["standard", "標準"], ["advanced", "応用"]] as const;
 
 export default function SettingsPage() {
-  const supabase = createClient();
+  const supabase = useSupabase();
   const [loading, setLoading] = useState(true);
   const [configError, setConfigError] = useState<string | null>(null);
   const [tab, setTab] = useState(0);
@@ -77,7 +78,7 @@ export default function SettingsPage() {
   const [promptError, setPromptError] = useState<string | null>(null);
   const [promptCopied, setPromptCopied] = useState(false);
 
-  const loadAll = async () => {
+  const loadAll = useCallback(async () => {
     try {
       const [subjectsRes, unitsRes, materialsRes, materialUnitsRes] = await Promise.all([
         supabase.from("subjects").select("id, name, color, sort_order, is_target, input_profile, columns_enabled").order("sort_order"),
@@ -96,25 +97,20 @@ export default function SettingsPage() {
       setUnits((unitsRes.data ?? []) as Unit[]);
       setMaterials((materialsRes.data ?? []) as Material[]);
       setMaterialUnits((materialUnitsRes.data ?? []) as Array<{ material_id: string; unit_id: string }>);
-      if (!selectedSubjectId && subjectData.length > 0) {
-        setSelectedSubjectId(subjectData[0].id);
-      }
+      if (subjectData.length > 0) setSelectedSubjectId((current) => current || subjectData[0].id);
     } catch {
       setConfigError("Supabaseに接続できません。.env.local を確認してください。");
     } finally {
       setLoading(false);
     }
-  };
+  }, [supabase]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadAll();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [loadAll]);
 
   useEffect(() => {
     if (!isPushSupported()) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setPushSupported(true);
     navigator.serviceWorker.ready
       .then((registration) => registration.pushManager.getSubscription())
@@ -146,6 +142,7 @@ export default function SettingsPage() {
           applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
         });
         const json = subscription.toJSON();
+        if (!json.endpoint || !json.keys) throw new Error("通知購読情報を取得できませんでした");
         const { error } = await supabase.from("push_subscriptions").upsert(
           {
             endpoint: json.endpoint,
@@ -158,7 +155,8 @@ export default function SettingsPage() {
       } else {
         const subscription = await registration.pushManager.getSubscription();
         if (subscription) {
-          await supabase.from("push_subscriptions").delete().eq("endpoint", subscription.endpoint);
+          const { error } = await supabase.from("push_subscriptions").delete().eq("endpoint", subscription.endpoint);
+          throwIfSupabaseError(error);
           await subscription.unsubscribe();
         }
         setPushEnabled(false);
@@ -232,8 +230,10 @@ export default function SettingsPage() {
   const renameUnit = async (unit: Unit, name: string) => {
     setUnits((prev) => prev.map((u) => (u.id === unit.id ? { ...u, name } : u)));
     try {
-      await supabase.from("units").update({ name }).eq("id", unit.id);
-    } catch {
+      const { error } = await supabase.from("units").update({ name }).eq("id", unit.id);
+      throwIfSupabaseError(error);
+    } catch (error) {
+      setConfigError(error instanceof Error ? error.message : "単元名を更新できませんでした。");
       await loadAll();
     }
   };
@@ -241,8 +241,10 @@ export default function SettingsPage() {
   const renameMaterial = async (material: Material, name: string) => {
     setMaterials((prev) => prev.map((m) => (m.id === material.id ? { ...m, name } : m)));
     try {
-      await supabase.from("materials").update({ name }).eq("id", material.id);
-    } catch {
+      const { error } = await supabase.from("materials").update({ name }).eq("id", material.id);
+      throwIfSupabaseError(error);
+    } catch (error) {
+      setConfigError(error instanceof Error ? error.message : "教材名を更新できませんでした。");
       await loadAll();
     }
   };
@@ -276,18 +278,23 @@ export default function SettingsPage() {
   const setMaterialUnitIds = async (materialId: string, unitIds: string[]) => {
     const previousRows = materialUnits.filter((row) => row.material_id === materialId);
     setMaterialUnits((rows) => [...rows.filter((row) => row.material_id !== materialId), ...unitIds.map((unit_id) => ({ material_id: materialId, unit_id }))]);
-    const { error: deleteError } = await supabase.from("material_units").delete().eq("material_id", materialId);
-    const { error: insertError } = unitIds.length ? await supabase.from("material_units").insert(unitIds.map((unit_id) => ({ material_id: materialId, unit_id }))) : { error: null };
-    if (deleteError || insertError) {
+    const { error } = await supabase.rpc("replace_material_units", {
+      p_material_id: materialId,
+      p_unit_ids: unitIds,
+    });
+    if (error) {
       setMaterialUnits((rows) => [...rows.filter((row) => row.material_id !== materialId), ...previousRows]);
+      setConfigError(error.message);
     }
   };
 
   const deleteUnit = async (id: string) => {
     setUnits((prev) => prev.filter((u) => u.id !== id));
     try {
-      await supabase.from("units").delete().eq("id", id);
-    } catch {
+      const { error } = await supabase.from("units").delete().eq("id", id);
+      throwIfSupabaseError(error);
+    } catch (error) {
+      setConfigError(error instanceof Error ? error.message : "単元を削除できませんでした。");
       await loadAll();
     }
   };
@@ -295,8 +302,10 @@ export default function SettingsPage() {
   const deleteMaterial = async (id: string) => {
     setMaterials((prev) => prev.filter((m) => m.id !== id));
     try {
-      await supabase.from("materials").delete().eq("id", id);
-    } catch {
+      const { error } = await supabase.from("materials").delete().eq("id", id);
+      throwIfSupabaseError(error);
+    } catch (error) {
+      setConfigError(error instanceof Error ? error.message : "教材を削除できませんでした。");
       await loadAll();
     }
   };
@@ -348,11 +357,13 @@ export default function SettingsPage() {
     });
     setUnits(updated);
     try {
-      await Promise.all([
+      const results = await Promise.all([
         supabase.from("units").update({ sort_order: other.sort_order }).eq("id", unit.id),
         supabase.from("units").update({ sort_order: unit.sort_order }).eq("id", other.id),
       ]);
-    } catch {
+      results.forEach(({ error }) => throwIfSupabaseError(error));
+    } catch (error) {
+      setConfigError(error instanceof Error ? error.message : "単元の並び順を更新できませんでした。");
       await loadAll();
     }
   };
@@ -529,7 +540,7 @@ export default function SettingsPage() {
             <Box>
               <Typography variant="subtitle2">通知(Push)</Typography>
               <Typography variant="caption" color="text.secondary">
-                毎朝の復習提案と20:30／21:30の記録リマインド
+                毎朝の復習提案と夜の記録リマインド（配信時刻は前後することがあります）
               </Typography>
             </Box>
             <Switch

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
 import Paper from "@mui/material/Paper";
@@ -26,7 +26,10 @@ import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import { useSupabase } from "@/lib/supabase/use-client";
+import { addDays, formatLocalDate } from "@/lib/date";
+import { calculatePlanExecution } from "@/lib/study-metrics";
+import { throwIfSupabaseError } from "@/lib/supabase/error";
 import {
   daysUntil,
   EVENT_KIND_COLORS,
@@ -42,6 +45,8 @@ type EventRow = {
   title: string;
   due_date: string;
   done: boolean;
+  event_subjects: Array<{ subject_id: string }>;
+  event_units: Array<{ unit_id: string }>;
 };
 type SubjectRow = { id: string; name: string; color: string };
 type UnitRow = { id: string; subject_id: string; name: string };
@@ -63,18 +68,15 @@ const WEEKDAYS = [
   ["mon", "月"], ["tue", "火"], ["wed", "水"], ["thu", "木"],
   ["fri", "金"], ["sat", "土"], ["sun", "日"],
 ] as const;
-const JS_DAY_TO_CODE = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
 const TIME_PRESETS: Array<[string, string]> = [["19:00", "20:00"], ["20:00", "21:30"], ["21:00", "22:00"]];
 const RECURRING_WEEKS = 6;
 
 function todayStr() {
-  return new Date().toISOString().slice(0, 10);
+  return formatLocalDate(new Date());
 }
 
 function addDaysStr(dateStr: string, days: number) {
-  const d = new Date(`${dateStr}T00:00:00`);
-  d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
+  return addDays(dateStr, days);
 }
 
 function minutesBetween(start: string, end: string) {
@@ -84,7 +86,7 @@ function minutesBetween(start: string, end: string) {
 }
 
 export default function SchedulePage() {
-  const supabase = createClient();
+  const supabase = useSupabase();
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [configError, setConfigError] = useState<string | null>(null);
@@ -97,7 +99,7 @@ export default function SchedulePage() {
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
   const [newKind, setNewKind] = useState<EventKind>("assignment");
   const [newTitle, setNewTitle] = useState("");
-  const [newDate, setNewDate] = useState(todayStr());
+  const [newDate, setNewDate] = useState<string>(todayStr());
   const [newSubjectId, setNewSubjectId] = useState("");
   const [newUnitId, setNewUnitId] = useState("");
   const [saving, setSaving] = useState(false);
@@ -110,10 +112,10 @@ export default function SchedulePage() {
 
   // --- 学習時間割(plan_blocks) ---
   const [planBlocks, setPlanBlocks] = useState<PlanBlockRow[]>([]);
-  const [selectedDate, setSelectedDate] = useState(todayStr());
+  const [selectedDate, setSelectedDate] = useState<string>(todayStr());
   const [planDialogOpen, setPlanDialogOpen] = useState(false);
   const [planMode, setPlanMode] = useState<"single" | "weekly">("single");
-  const [planDate, setPlanDate] = useState(todayStr());
+  const [planDate, setPlanDate] = useState<string>(todayStr());
   const [planWeekdays, setPlanWeekdays] = useState<string[]>([]);
   const [planStart, setPlanStart] = useState("19:00");
   const [planEnd, setPlanEnd] = useState("20:00");
@@ -123,7 +125,7 @@ export default function SchedulePage() {
   const [planSaving, setPlanSaving] = useState(false);
   const [planError, setPlanError] = useState<string | null>(null);
 
-  const loadPlanBlocks = async () => {
+  const loadPlanBlocks = useCallback(async () => {
     const { data, error } = await supabase
       .from("plan_blocks")
       .select("id,plan_date,start_time,end_time,subject_id,unit_id,memo,recurrence_rule,source_plan_id,status,linked_session_batch_id")
@@ -131,13 +133,11 @@ export default function SchedulePage() {
       .order("plan_date")
       .order("start_time");
     if (!error) setPlanBlocks((data ?? []) as PlanBlockRow[]);
-  };
+  }, [supabase]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadPlanBlocks();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [loadPlanBlocks]);
 
   const openPlanDialog = () => {
     setPlanMode("single");
@@ -176,26 +176,17 @@ export default function SchedulePage() {
         const { error } = await supabase.from("plan_blocks").insert({ ...base, plan_date: planDate, recurrence_rule: null });
         if (error) throw error;
       } else {
-        const rule = `weekly:${planWeekdays.join(",")}`;
-        const { data: template, error: templateError } = await supabase
-          .from("plan_blocks")
-          .insert({ ...base, plan_date: planDate, recurrence_rule: rule })
-          .select("id")
-          .single();
-        if (templateError) throw templateError;
-        const instances: Array<Record<string, unknown>> = [];
-        for (let i = 0; i < RECURRING_WEEKS * 7; i++) {
-          const dateStr = addDaysStr(planDate, i);
-          if (dateStr < planDate) continue;
-          const code = JS_DAY_TO_CODE[new Date(`${dateStr}T00:00:00`).getDay()];
-          if (planWeekdays.includes(code)) {
-            instances.push({ ...base, plan_date: dateStr, recurrence_rule: null, source_plan_id: template.id });
-          }
-        }
-        if (instances.length) {
-          const { error: instancesError } = await supabase.from("plan_blocks").insert(instances);
-          if (instancesError) throw instancesError;
-        }
+        const { error: recurringError } = await supabase.rpc("create_recurring_plan", {
+          p_plan_date: planDate,
+          p_start_time: planStart,
+          p_end_time: planEnd,
+          p_subject_id: planSubjectId,
+          p_unit_id: planUnitId,
+          p_memo: planMemo,
+          p_weekdays: planWeekdays,
+          p_weeks: RECURRING_WEEKS,
+        });
+        if (recurringError) throw recurringError;
       }
       setPlanDialogOpen(false);
       await loadPlanBlocks();
@@ -209,14 +200,19 @@ export default function SchedulePage() {
   const setPlanStatus = async (block: PlanBlockRow, status: PlanBlockRow["status"]) => {
     setPlanBlocks((rows) => rows.map((row) => row.id === block.id ? { ...row, status } : row));
     const { error } = await supabase.from("plan_blocks").update({ status }).eq("id", block.id);
-    if (error) await loadPlanBlocks();
+    if (error) {
+      setPlanError(error.message);
+      await loadPlanBlocks();
+    }
   };
 
   const deletePlanBlock = async (id: string) => {
     setPlanBlocks((rows) => rows.filter((row) => row.id !== id));
     try {
-      await supabase.from("plan_blocks").delete().eq("id", id);
-    } catch {
+      const { error } = await supabase.from("plan_blocks").delete().eq("id", id);
+      throwIfSupabaseError(error);
+    } catch (error) {
+      setPlanError(error instanceof Error ? error.message : "予定を削除できませんでした。");
       await loadPlanBlocks();
     }
   };
@@ -237,20 +233,14 @@ export default function SchedulePage() {
     [planBlocks, selectedDate],
   );
   const planExecution = useMemo(() => {
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - 28);
-    const cutoffKey = cutoff.toISOString().slice(0, 10);
-    const today = todayStr();
-    const matured = planBlocks.filter((row) => row.plan_date >= cutoffKey && row.plan_date < today);
-    const done = matured.filter((row) => row.status === "done").length;
-    return { total: matured.length, done, linked: matured.filter((row) => row.linked_session_batch_id).length, rate: matured.length ? Math.round(done / matured.length * 100) : null };
+    return calculatePlanExecution(planBlocks, todayStr());
   }, [planBlocks]);
 
-  const loadEvents = async () => {
+  const loadEvents = useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from("events")
-        .select("id, kind, title, due_date, done")
+        .select("id, kind, title, due_date, done, event_subjects(subject_id), event_units(unit_id)")
         .order("due_date", { ascending: true });
       if (error) {
         setConfigError(
@@ -264,13 +254,11 @@ export default function SchedulePage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [supabase]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadEvents();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [loadEvents]);
 
   useEffect(() => {
     Promise.all([
@@ -280,8 +268,7 @@ export default function SchedulePage() {
       setSubjects((subjectResult.data ?? []) as SubjectRow[]);
       setUnits((unitResult.data ?? []) as UnitRow[]);
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [supabase]);
 
   const openDialog = () => {
     setEditingEventId(null);
@@ -299,8 +286,8 @@ export default function SchedulePage() {
     setNewKind(event.kind);
     setNewTitle(event.title);
     setNewDate(event.due_date);
-    setNewSubjectId("");
-    setNewUnitId("");
+    setNewSubjectId(event.event_subjects[0]?.subject_id ?? "");
+    setNewUnitId(event.event_units[0]?.unit_id ?? "");
     setFormError(null);
     setDialogOpen(true);
   };
@@ -313,19 +300,15 @@ export default function SchedulePage() {
     setSaving(true);
     setFormError(null);
     try {
-      const payload = { kind: newKind, title: newTitle.trim(), due_date: newDate };
-      const { data, error } = editingEventId
-        ? await supabase.from("events").update(payload).eq("id", editingEventId).select("id").single()
-        : await supabase.from("events").insert(payload).select("id").single();
+      const { error } = await supabase.rpc("save_event_with_links", {
+        p_event_id: editingEventId ?? "",
+        p_kind: newKind,
+        p_title: newTitle.trim(),
+        p_due_date: newDate,
+        p_subject_id: newSubjectId,
+        p_unit_id: newUnitId,
+      });
       if (error) throw error;
-      if (!editingEventId && newSubjectId) {
-        const { error: subjectError } = await supabase.from("event_subjects").insert({ event_id: data.id, subject_id: newSubjectId });
-        if (subjectError) throw subjectError;
-      }
-      if (!editingEventId && newUnitId) {
-        const { error: unitError } = await supabase.from("event_units").insert({ event_id: data.id, unit_id: newUnitId });
-        if (unitError) throw unitError;
-      }
       setDialogOpen(false);
       await loadEvents();
     } catch (e) {
@@ -336,21 +319,26 @@ export default function SchedulePage() {
   };
 
   const toggleDone = async (event: EventRow) => {
+    const previous = event.done;
     setEvents((prev) =>
-      prev.map((e) => (e.id === event.id ? { ...e, done: !e.done } : e)),
+      prev.map((e) => (e.id === event.id ? { ...e, done: !previous } : e)),
     );
     try {
-      await supabase.from("events").update({ done: !event.done }).eq("id", event.id);
-    } catch {
-      // 次回読み込みで整合
+      const { error } = await supabase.from("events").update({ done: !previous }).eq("id", event.id);
+      throwIfSupabaseError(error);
+    } catch (error) {
+      setEvents((prev) => prev.map((e) => (e.id === event.id ? { ...e, done: previous } : e)));
+      setFormError(error instanceof Error ? error.message : "予定を更新できませんでした。");
     }
   };
 
   const deleteEvent = async (id: string) => {
     setEvents((prev) => prev.filter((e) => e.id !== id));
     try {
-      await supabase.from("events").delete().eq("id", id);
-    } catch {
+      const { error } = await supabase.from("events").delete().eq("id", id);
+      throwIfSupabaseError(error);
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : "予定を削除できませんでした。");
       await loadEvents();
     }
   };
@@ -509,7 +497,7 @@ export default function SchedulePage() {
             ))}
             {calendarCells.map((date, i) => {
               if (!date) return <Box key={i} />;
-              const dateStr = date.toISOString().slice(0, 10);
+              const dateStr = formatLocalDate(date);
               const dayEvents = eventsByDate.get(dateStr) ?? [];
               const isToday = dateStr === todayStr();
               return (
@@ -634,14 +622,14 @@ export default function SchedulePage() {
               size="small"
               placeholder="例: 数学課題プリント提出"
             />
-            {!editingEventId && <TextField select label="対象科目（任意）" value={newSubjectId} onChange={(event) => { setNewSubjectId(event.target.value); setNewUnitId(""); }} fullWidth size="small">
+            <TextField select label="対象科目（任意）" value={newSubjectId} onChange={(event) => { setNewSubjectId(event.target.value); setNewUnitId(""); }} fullWidth size="small">
               <MenuItem value="">指定しない</MenuItem>
               {subjects.map((subject) => <MenuItem key={subject.id} value={subject.id}>{subject.name}</MenuItem>)}
-            </TextField>}
-            {!editingEventId && <TextField select label="対象単元（任意）" value={newUnitId} onChange={(event) => setNewUnitId(event.target.value)} disabled={!newSubjectId} fullWidth size="small">
+            </TextField>
+            <TextField select label="対象単元（任意）" value={newUnitId} onChange={(event) => setNewUnitId(event.target.value)} disabled={!newSubjectId} fullWidth size="small">
               <MenuItem value="">指定しない</MenuItem>
               {units.filter((unit) => unit.subject_id === newSubjectId).map((unit) => <MenuItem key={unit.id} value={unit.id}>{unit.name}</MenuItem>)}
-            </TextField>}
+            </TextField>
             <TextField
               label="締切日"
               type="date"

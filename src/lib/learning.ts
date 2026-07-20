@@ -1,3 +1,5 @@
+import { formatLocalDate, startOfWeek } from "@/lib/date";
+
 export const UNDERSTANDING_OPTIONS = [
   ["understood", "できた"],
   ["uncertain", "少し不安"],
@@ -50,7 +52,5 @@ export function classifyLearningState(args: {
 }
 
 export function startOfWeekDate(date = new Date()) {
-  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
-  return d.toISOString().slice(0, 10);
+  return startOfWeek(formatLocalDate(date));
 }
