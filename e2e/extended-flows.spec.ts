@@ -15,17 +15,25 @@ test("履歴の記録を編集して削除できる", async ({ page }) => {
   await page.getByRole("button", { name: "保存" }).click();
   await expect(row.getByText("65分", { exact: true })).toBeVisible();
 
+  page.once("dialog", (dialog) => dialog.accept());
   await row.getByLabel("記録を削除").click();
-  await page.getByRole("button", { name: "OK" }).click();
   await expect(page.getByText(`メモ: ${memo}`, { exact: true })).toHaveCount(0);
 });
 
 test("繰り返し時間割を作成できる", async ({ page }) => {
   const memo = `E2E時間割-${crypto.randomUUID()}`;
+  // plan_blocks are only rendered for the currently selected date, and the
+  // recurring plan only creates rows on the chosen weekdays starting today.
+  // Pick today's weekday chip so the first generated block lands on the
+  // already-selected date (today) and is visible without navigating.
+  const weekdayLabels = ["日", "月", "火", "水", "木", "金", "土"];
+  const todayLabel = weekdayLabels[new Date().getDay()];
+
   await page.goto("/schedule");
-  await page.getByRole("button", { name: "時間割を追加" }).click();
+  await page.getByRole("button", { name: "時間割" }).click();
+  await page.getByRole("button", { name: "追加" }).click();
   await page.getByRole("button", { name: "毎週繰り返し" }).click();
-  await page.getByText("日", { exact: true }).last().click();
+  await page.getByText(todayLabel, { exact: true }).last().click();
   await page.getByLabel("メモ（任意）").fill(memo);
   await page.getByRole("button", { name: "保存" }).click();
   await expect(page.getByText(memo, { exact: true }).first()).toBeVisible();
