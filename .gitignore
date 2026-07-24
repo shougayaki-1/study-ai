@@ -41,6 +41,7 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 !.env.local.example
+!analysis/.env.example
 
 # personal study data (mock exam scores, target schools etc.) - not meant to be committed
 /docs/study-profile/
