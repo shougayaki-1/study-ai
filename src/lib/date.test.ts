@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addDays, formatDateInTimeZone, formatLocalDate, localDayUtcRange, parseLocalDate, startOfWeek } from "./date";
+import { addDays, formatDateInTimeZone, formatIsoWithJstOffset, formatLocalDate, localDayUtcRange, parseLocalDate, startOfWeek } from "./date";
 
 describe("local date keys in Asia/Tokyo", () => {
   it("does not roll local midnight back to the previous UTC day", () => {
@@ -30,5 +30,11 @@ describe("local date keys in Asia/Tokyo", () => {
 
   it("rejects invalid calendar dates", () => {
     expect(() => parseLocalDate("2026-02-30")).toThrow("Invalid date key");
+  });
+
+  it("formats a UTC instant as JST ISO8601 with a +09:00 offset", () => {
+    expect(formatIsoWithJstOffset(new Date("2026-07-23T23:12:00.000Z"))).toBe(
+      "2026-07-24T08:12:00+09:00",
+    );
   });
 });
