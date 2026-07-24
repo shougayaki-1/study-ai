@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { readVaultFile, parseConfirmTodos } from "@/lib/vault";
 import ConfirmTodoList from "./confirm-todo-list";
+import { stripConfirmTodoSection } from "../_lib/strip-confirm-todo-section";
 
 export const dynamic = "force-dynamic";
 
@@ -34,7 +35,9 @@ export default async function DailyReportPage({
             "& p": { my: 0.5 },
           }}
         >
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{body}</ReactMarkdown>
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            {stripConfirmTodoSection(body)}
+          </ReactMarkdown>
         </Box>
       </Paper>
     </Box>
