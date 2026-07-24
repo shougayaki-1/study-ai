@@ -24,6 +24,17 @@ study-ai の「Mac上のClaude Codeが毎晩ヘッドレス実行(`claude -p`)�
 - Claude Code CLI がインストール済み・ログイン済みであること
 - Supabaseプロジェクトに `supabase/schema.sql` が投入済みであること
 
+## vaultのセットアップ(必須)
+
+夜間バッチはSupabaseの代わりに `vault/`(Google ドライブ同期フォルダ内)を直接読み書きする。
+
+1. Google ドライブ デスクトップアプリでMacに同期済みの`vault/`フォルダの絶対パスを確認する
+   (例: `/Users/shoug/Google Drive/マイドライブ/study-ai-vault`)。
+2. `analysis/.env` に `STUDY_AI_VAULT_DIR=<上記の絶対パス>` を追記する
+   (`analysis/.env.example` にテンプレートがある)。
+3. 動作確認: `STUDY_AI_VAULT_DIR=<絶対パス> node analysis/helpers/list-inbox-items.mjs`
+   を実行し、エラーなくJSON(空配列でもよい)が返ることを確認する。
+
 ## セットアップ
 
 ### 1. Supabase Service Role キーの取得
@@ -54,10 +65,11 @@ cp .env.example .env
 
 ```bash
 cd /Users/shoug/Documents/GitHub/study-ai
-node analysis/helpers/list-pending-photos.mjs
+node analysis/helpers/list-inbox-items.mjs
 ```
 
-エラーなくJSON(空配列でもよい)が返ればSupabase接続はOK。
+エラーなくJSON(空配列でもよい)が返れば`STUDY_AI_VAULT_DIR`の設定はOK
+(夜間バッチはこのvault接続のみで動く。Supabase接続確認は本バッチでは不要になった)。
 
 ## 手動実行
 
