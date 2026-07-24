@@ -20,6 +20,8 @@ import InsightsIcon from "@mui/icons-material/Insights";
 import EventNoteIcon from "@mui/icons-material/EventNote";
 import SettingsIcon from "@mui/icons-material/Settings";
 import MenuIcon from "@mui/icons-material/Menu";
+import ArticleIcon from "@mui/icons-material/Article";
+import MedicalInformationIcon from "@mui/icons-material/MedicalInformation";
 
 const NAV_ITEMS = [
   { label: "今日", value: "/", icon: <TodayIcon /> },
@@ -27,6 +29,8 @@ const NAV_ITEMS = [
   { label: "履歴", value: "/records", icon: <ListAltIcon /> },
   { label: "分析", value: "/stats", icon: <InsightsIcon /> },
   { label: "予定", value: "/schedule", icon: <EventNoteIcon /> },
+  { label: "レポート", value: "/reports", icon: <ArticleIcon /> },
+  { label: "カルテ", value: "/karte", icon: <MedicalInformationIcon /> },
   { label: "設定", value: "/settings", icon: <SettingsIcon /> },
 ];
 
