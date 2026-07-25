@@ -163,11 +163,16 @@ EOF
 
 **Files:**
 - Create: `analysis/test/fixtures/study-record.md`
+- Create: `src/lib/vault/line-format.ts`（禁止文字チェックの共有実装。契約 §0 により**TS側で1箇所に集約**する。計画2の `schedule.ts`/`plan.ts` もこれを import する）
 - Create: `src/lib/vault/study-sessions.ts`
 - Create: `src/lib/vault/study-sessions.test.ts`
 
 **Interfaces:**
 - Consumes: なし(新規ファイル)。
+- Produces: `src/lib/vault/line-format.ts` から
+  `export function assertSafeValue(value: string, field: string): void`
+  （値に ` | ` または改行が含まれるとthrow）。**計画2がこれを import する**ので、
+  名前・シグネチャ・エラーメッセージを変更しないこと。
 - Produces: `StudyKind`, `Understanding`, `StudySession`型、`parseStudySessions(body: string): StudySession[]`、`formatStudySessionLine(session: StudySession): string`。Task 3・Task 4・Task 5・Task 6の他タスクが利用する。
 
 ### ステップ
@@ -311,7 +316,21 @@ npx vitest run src/lib/vault/study-sessions.test.ts
 4. 最小実装を書く。
 
 ```ts
+// src/lib/vault/line-format.ts
+// 契約 §0: 行フォーマットの値に含めてはならない文字の検査。TS側はこの1箇所に集約し、
+// 記録(study-sessions.ts)・予定(schedule.ts)・学習計画(plan.ts)のフォーマッタが共有する。
+// `=` は禁止しない(最初の `=` で分割するため値に含めても安全)。
+export function assertSafeValue(value: string, field: string): void {
+  if (value.includes(" | ") || value.includes("\n")) {
+    throw new Error(`${field} must not contain ' | ' or a newline: ${JSON.stringify(value)}`);
+  }
+}
+```
+
+```ts
 // src/lib/vault/study-sessions.ts
+import { assertSafeValue } from "./line-format";
+
 export type StudyKind = "material" | "common_test" | "secondary";
 export type Understanding = "understood" | "uncertain" | "not_understood";
 export type StudySession = {
@@ -357,18 +376,12 @@ export function parseStudySessions(body: string): StudySession[] {
   return sessions;
 }
 
-function assertSafeValue(value: string): void {
-  if (value.includes(" | ") || value.includes("\n")) {
-    throw new Error(`study session field value must not contain ' | ' or a newline: ${JSON.stringify(value)}`);
-  }
-}
-
 export function formatStudySessionLine(session: StudySession): string {
-  assertSafeValue(session.id);
-  assertSafeValue(session.subject);
-  assertSafeValue(session.understanding);
-  assertSafeValue(session.memo);
-  if (session.kind === "common_test" && session.section) assertSafeValue(session.section);
+  assertSafeValue(session.id, "id");
+  assertSafeValue(session.subject, "subject");
+  assertSafeValue(session.understanding, "understanding");
+  assertSafeValue(session.memo, "memo");
+  if (session.kind === "common_test" && session.section) assertSafeValue(session.section, "section");
 
   const parts = [
     `id=${session.id}`,
@@ -631,11 +644,15 @@ EOF
 ## Task 5: Node側 — 記録のパース/フォーマット/採番(`analysis/helpers/vault/study-sessions.mjs`)
 
 **Files:**
+- Create: `analysis/helpers/vault/line-format.mjs`（禁止文字チェックの共有実装。契約 §0 により**Node側で1箇所に集約**する。計画2の `schedule.mjs`/`plan.mjs` もこれを import する）
 - Create: `analysis/helpers/vault/study-sessions.mjs`
 - Create: `analysis/test/vault-study-sessions.test.mjs`
 
 **Interfaces:**
 - Consumes: Task 2で作成した共有フィクスチャ`analysis/test/fixtures/study-record.md`。
+- Produces: `analysis/helpers/vault/line-format.mjs` から
+  `export function assertSafeValue(value, field)`（TS版 `src/lib/vault/line-format.ts` と
+  同じ判定・同じエラーメッセージ）。**計画2がこれを import する**ので名前・シグネチャを変更しないこと。
 - Produces: `parseStudySessions(body)`、`formatStudySessionLine(session)`、`nextSessionId(sessions)`。Task 6・7・9が利用する。TS版(Task 2)と同一フィクスチャで解釈結果が一致することはTask 6のparityテストで検証する。
 
 ### ステップ
@@ -750,7 +767,22 @@ node --test analysis/test/vault-study-sessions.test.mjs
 3. 最小実装を書く。
 
 ```js
+// analysis/helpers/vault/line-format.mjs
+// 契約 §0: 行フォーマットの値に含めてはならない文字の検査。Node側はこの1箇所に集約し、
+// 記録(study-sessions.mjs)・予定(schedule.mjs)・学習計画(plan.mjs)のフォーマッタが共有する。
+// `=` は禁止しない(最初の `=` で分割するため値に含めても安全)。
+// TS版 src/lib/vault/line-format.ts と同じ判定・同じエラーメッセージにすること。
+export function assertSafeValue(value, field) {
+  if (typeof value === 'string' && (value.includes(' | ') || value.includes('\n'))) {
+    throw new Error(`${field} must not contain ' | ' or a newline: ${JSON.stringify(value)}`);
+  }
+}
+```
+
+```js
 // analysis/helpers/vault/study-sessions.mjs
+import { assertSafeValue } from './line-format.mjs';
+
 const PREFIX = '- ';
 
 export function parseStudySessions(body) {
@@ -783,18 +815,12 @@ export function parseStudySessions(body) {
   return sessions;
 }
 
-function assertSafeValue(value) {
-  if (typeof value === 'string' && (value.includes(' | ') || value.includes('\n'))) {
-    throw new Error(`study session field value must not contain ' | ' or a newline: ${JSON.stringify(value)}`);
-  }
-}
-
 export function formatStudySessionLine(session) {
-  assertSafeValue(session.id);
-  assertSafeValue(session.subject);
-  assertSafeValue(session.understanding);
-  assertSafeValue(session.memo);
-  if (session.kind === 'common_test' && session.section) assertSafeValue(session.section);
+  assertSafeValue(session.id, 'id');
+  assertSafeValue(session.subject, 'subject');
+  assertSafeValue(session.understanding, 'understanding');
+  assertSafeValue(session.memo, 'memo');
+  if (session.kind === 'common_test' && session.section) assertSafeValue(session.section, 'section');
 
   const parts = [
     `id=${session.id}`,

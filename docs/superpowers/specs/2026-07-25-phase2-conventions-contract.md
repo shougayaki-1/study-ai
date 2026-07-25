@@ -18,9 +18,16 @@
   `key=value` は**最初の `=` で分割**。
   したがって **値に含めてはならないのは ` | ` と改行の2つだけ**。`=` は値に含めてよい
   （最初の `=` で分割するため `title=y=mx+b` は正しく `y=mx+b` と解釈される）。
-- **禁止文字はコードで強制する。** フォーマッタ（またはその直前の共通関数）で、各値が
-  ` | ` または改行(`\n`)を含む場合は `throw` する。プロンプト（`docs/study-dialogue.md`）の
-  指示だけに頼らない。CLIラッパーはこの throw を呼び出し元に伝え、対話側が言い直しを促す。
+- **禁止文字はコードで強制する。** 各値が ` | ` または改行(`\n`)を含む場合は `throw` する。
+  プロンプト（`docs/study-dialogue.md`）の指示だけに頼らない。CLIラッパーはこの throw を
+  呼び出し元に伝え、対話側が言い直しを促す。
+  **実装は言語ごとに1箇所へ集約する**（記録・予定・学習計画の各フォーマッタで再定義しない）:
+  - TS: `src/lib/vault/line-format.ts` に `export function assertSafeValue(value: string, field: string): void`
+  - Node: `analysis/helpers/vault/line-format.mjs` に `export function assertSafeValue(value, field)`
+  どちらもエラーメッセージは
+  `` `${field} must not contain ' | ' or a newline: ${JSON.stringify(value)}` `` に統一する
+  （対話側がユーザーに理由を説明できるよう、どのフィールドが原因かを必ず含める）。
+  **計画1がこの2ファイルを作成し、計画2は import して使う**（再定義禁止）。
 - **リーダは壊れた行・必須キー欠落の行をその行だけスキップ**し、全体を落とさない。
 - **ライタは認識できない行を保存する（破壊しない）。** 追記・更新・削除は
   「対象行だけを操作し、他の行はそのまま残す」方式で実装すること。
@@ -43,6 +50,12 @@
    乖離する事故を構造的に防ぐ）。
 2. **parityテストを置く。** 同じフィクスチャを両実装でパースし、`JSON.stringify` の結果が
    一致することを検証するテストを、記録・予定・学習計画それぞれに1本ずつ用意する。
+   **機構は全計画で統一する**: vitest 側（`src/**/*.test.ts`）から
+   `await import(pathToFileURL(path.join(REPO_ROOT, "analysis/helpers/vault/<name>.mjs")).href)`
+   で Node 実装を動的 import し、TS 実装の結果と比較する。
+   この機構は既存の `analysis/helpers/vault/frontmatter.mjs` を使った使い捨てテストで
+   **実機検証済み**（2026-07-26）。`vitest.config.ts` の `include: ["src/**/*.test.ts"]` と
+   `environment: "node"` のまま追加設定なしで動く。`/* @vite-ignore */` は不要。
 3. **フォーマットを変更するときの手順**（将来の同期漏れ防止）:
    ①共有フィクスチャに新ケースを追加 → ②両実装のテストが落ちることを確認 → ③両方を直す →
    ④`schema_version` を上げる。リーダは**未知の `schema_version` を検出したら警告を表示する**

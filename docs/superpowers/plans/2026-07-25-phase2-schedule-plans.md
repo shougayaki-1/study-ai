@@ -133,17 +133,16 @@ npx vitest run src/lib/vault/schedule.test.ts
 4. 最小実装。`src/lib/vault/schedule.ts` を新規作成:
 
 ```ts
+// 禁止文字チェックは契約 §0 によりTS側で1箇所に集約されている(計画1 Task 2が作成)。
+// ここで再定義してはならない。
+import { assertSafeValue } from "./line-format";
+
 export type ScheduleKind = "assignment" | "application" | "mock_exam" | "exam" | "other";
 export type ScheduleEvent = { id: string; kind: ScheduleKind; title: string; due: string; done: boolean };
 
 const DONE_PREFIX = "- [x] ";
 const TODO_PREFIX = "- [ ] ";
 
-function assertNoDelimiters(value: string, field: string): void {
-  if (value.includes(" | ") || value.includes("\n")) {
-    throw new Error(`${field} must not contain " | " or a newline: ${value}`);
-  }
-}
 
 export function parseScheduleEvents(body: string): ScheduleEvent[] {
   const events: ScheduleEvent[] = [];
@@ -172,10 +171,10 @@ export function parseScheduleEvents(body: string): ScheduleEvent[] {
 }
 
 export function formatScheduleEventLine(event: ScheduleEvent): string {
-  assertNoDelimiters(event.id, "id");
-  assertNoDelimiters(event.kind, "kind");
-  assertNoDelimiters(event.title, "title");
-  assertNoDelimiters(event.due, "due");
+  assertSafeValue(event.id, "id");
+  assertSafeValue(event.kind, "kind");
+  assertSafeValue(event.title, "title");
+  assertSafeValue(event.due, "due");
   const prefix = event.done ? DONE_PREFIX : TODO_PREFIX;
   return `${prefix}id=${event.id} | kind=${event.kind} | title=${event.title} | due=${event.due}`;
 }
@@ -481,17 +480,15 @@ npx vitest run src/lib/vault/plan.test.ts
 
 ```ts
 import { readVaultFile } from "./read";
+// 禁止文字チェックは契約 §0 によりTS側で1箇所に集約されている(計画1 Task 2が作成)。
+// ここで再定義してはならない。
+import { assertSafeValue } from "./line-format";
 
 export type PlanStatus = "planned" | "done" | "skipped";
 export type PlanBlock = { id: string; start: string; end: string; subject: string; status: PlanStatus; memo: string };
 
 const PREFIX = "- ";
 
-function assertNoDelimiters(value: string, field: string): void {
-  if (value.includes(" | ") || value.includes("\n")) {
-    throw new Error(`${field} must not contain " | " or a newline: ${value}`);
-  }
-}
 
 export function parsePlanBlocks(body: string): PlanBlock[] {
   const blocks: PlanBlock[] = [];
@@ -517,12 +514,12 @@ export function parsePlanBlocks(body: string): PlanBlock[] {
 }
 
 export function formatPlanBlockLine(block: PlanBlock): string {
-  assertNoDelimiters(block.id, "id");
-  assertNoDelimiters(block.start, "start");
-  assertNoDelimiters(block.end, "end");
-  assertNoDelimiters(block.subject, "subject");
-  assertNoDelimiters(block.status, "status");
-  assertNoDelimiters(block.memo, "memo");
+  assertSafeValue(block.id, "id");
+  assertSafeValue(block.start, "start");
+  assertSafeValue(block.end, "end");
+  assertSafeValue(block.subject, "subject");
+  assertSafeValue(block.status, "status");
+  assertSafeValue(block.memo, "memo");
   return `${PREFIX}id=${block.id} | start=${block.start} | end=${block.end} | subject=${block.subject} | status=${block.status} | memo=${block.memo}`;
 }
 
@@ -706,15 +703,13 @@ npm run test:analysis
 
 ```js
 import { readVaultFile, writeVaultFile } from './read-write.mjs';
+// 禁止文字チェックは契約 §0 によりNode側で1箇所に集約されている(計画1 Task 5が作成)。
+// ここで再定義してはならない。
+import { assertSafeValue } from './line-format.mjs';
 
 const DONE_PREFIX = '- [x] ';
 const TODO_PREFIX = '- [ ] ';
 
-function assertNoDelimiters(value, field) {
-  if (value.includes(' | ') || value.includes('\n')) {
-    throw new Error(`${field} must not contain " | " or a newline: ${value}`);
-  }
-}
 
 export function parseScheduleEvents(body) {
   const events = [];
@@ -743,10 +738,10 @@ export function parseScheduleEvents(body) {
 }
 
 export function formatScheduleEventLine(event) {
-  assertNoDelimiters(event.id, 'id');
-  assertNoDelimiters(event.kind, 'kind');
-  assertNoDelimiters(event.title, 'title');
-  assertNoDelimiters(event.due, 'due');
+  assertSafeValue(event.id, 'id');
+  assertSafeValue(event.kind, 'kind');
+  assertSafeValue(event.title, 'title');
+  assertSafeValue(event.due, 'due');
   const prefix = event.done ? DONE_PREFIX : TODO_PREFIX;
   return `${prefix}id=${event.id} | kind=${event.kind} | title=${event.title} | due=${event.due}`;
 }
@@ -771,11 +766,16 @@ npm run test:analysis
 5. parityテストを追加する(I11-2対策)。TS実装とNode実装が両方揃ったので、同一フィクスチャを両方でパースし結果が一致することを検証する。`src/lib/vault/schedule.test.ts` の末尾に追加:
 
 ```ts
+// 機構は契約 §「フォーマット parity の担保」2 で統一されている: vitest から
+// pathToFileURL(...).href で Node 実装を動的 import する(実機検証済み、追加設定不要)。
+import { pathToFileURL } from "node:url";
+
 describe("TS/Node parity", () => {
   it("parseScheduleEvents produces the same structure in TS and Node", async () => {
-    const nodeModule = (await import(
-      /* @vite-ignore */ path.join(process.cwd(), "analysis/helpers/vault/schedule.mjs")
-    )) as { parseScheduleEvents: typeof parseScheduleEvents };
+    const nodeModulePath = path.join(process.cwd(), "analysis/helpers/vault/schedule.mjs");
+    const nodeModule = (await import(pathToFileURL(nodeModulePath).href)) as {
+      parseScheduleEvents: typeof parseScheduleEvents;
+    };
     const tsResult = parseScheduleEvents(SCHEDULE_FIXTURE_BODY);
     const nodeResult = nodeModule.parseScheduleEvents(SCHEDULE_FIXTURE_BODY);
     expect(JSON.stringify(nodeResult)).toBe(JSON.stringify(tsResult));
@@ -1046,14 +1046,12 @@ npm run test:analysis
 
 ```js
 import { readVaultFile, writeVaultFile } from './read-write.mjs';
+// 禁止文字チェックは契約 §0 によりNode側で1箇所に集約されている(計画1 Task 5が作成)。
+// ここで再定義してはならない。
+import { assertSafeValue } from './line-format.mjs';
 
 const PREFIX = '- ';
 
-function assertNoDelimiters(value, field) {
-  if (value.includes(' | ') || value.includes('\n')) {
-    throw new Error(`${field} must not contain " | " or a newline: ${value}`);
-  }
-}
 
 export function parsePlanBlocks(body) {
   const blocks = [];
@@ -1079,12 +1077,12 @@ export function parsePlanBlocks(body) {
 }
 
 export function formatPlanBlockLine(block) {
-  assertNoDelimiters(block.id, 'id');
-  assertNoDelimiters(block.start, 'start');
-  assertNoDelimiters(block.end, 'end');
-  assertNoDelimiters(block.subject, 'subject');
-  assertNoDelimiters(block.status, 'status');
-  assertNoDelimiters(block.memo, 'memo');
+  assertSafeValue(block.id, 'id');
+  assertSafeValue(block.start, 'start');
+  assertSafeValue(block.end, 'end');
+  assertSafeValue(block.subject, 'subject');
+  assertSafeValue(block.status, 'status');
+  assertSafeValue(block.memo, 'memo');
   return `${PREFIX}id=${block.id} | start=${block.start} | end=${block.end} | subject=${block.subject} | status=${block.status} | memo=${block.memo}`;
 }
 
@@ -1106,11 +1104,16 @@ npm run test:analysis
 5. parityテストを追加する(I11-2対策)。`src/lib/vault/plan.test.ts` の末尾に追加:
 
 ```ts
+// 機構は契約 §「フォーマット parity の担保」2 で統一されている: vitest から
+// pathToFileURL(...).href で Node 実装を動的 import する(実機検証済み、追加設定不要)。
+import { pathToFileURL } from "node:url";
+
 describe("TS/Node parity", () => {
   it("parsePlanBlocks produces the same structure in TS and Node", async () => {
-    const nodeModule = (await import(
-      /* @vite-ignore */ path.join(process.cwd(), "analysis/helpers/vault/plan.mjs")
-    )) as { parsePlanBlocks: typeof parsePlanBlocks };
+    const nodeModulePath = path.join(process.cwd(), "analysis/helpers/vault/plan.mjs");
+    const nodeModule = (await import(pathToFileURL(nodeModulePath).href)) as {
+      parsePlanBlocks: typeof parsePlanBlocks;
+    };
     const tsResult = parsePlanBlocks(PLAN_FIXTURE_BODY);
     const nodeResult = nodeModule.parsePlanBlocks(PLAN_FIXTURE_BODY);
     expect(JSON.stringify(nodeResult)).toBe(JSON.stringify(tsResult));
