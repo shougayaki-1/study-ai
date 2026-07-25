@@ -19,6 +19,22 @@ if [ -d "$FNM_DEFAULT_BIN" ]; then
   export PATH="$FNM_DEFAULT_BIN:$PATH"
 fi
 
+# vaultヘルパ(analysis/helpers/vault/root.mjs)は process.env.STUDY_AI_VAULT_DIR を
+# 直接参照し、analysis/.env を自動では読み込まない。手動実行・launchd実行のどちらでも
+# バッチが正しくvaultを指すよう、未設定なら analysis/.env から読み出してexportする。
+# (パスに空白や日本語を含みうるため、値は行の残り全体をそのまま代入する)
+if [ -z "${STUDY_AI_VAULT_DIR:-}" ] && [ -f analysis/.env ]; then
+  VAULT_DIR_LINE="$(grep -E '^STUDY_AI_VAULT_DIR=' analysis/.env | tail -n 1 || true)"
+  if [ -n "$VAULT_DIR_LINE" ]; then
+    export STUDY_AI_VAULT_DIR="${VAULT_DIR_LINE#STUDY_AI_VAULT_DIR=}"
+  fi
+fi
+
+if [ -z "${STUDY_AI_VAULT_DIR:-}" ]; then
+  echo "STUDY_AI_VAULT_DIR が未設定です。analysis/.env に設定するか環境変数で渡してください。" >&2
+  exit 1
+fi
+
 ENGINE="${STUDY_AI_AGENT_CLI:-claude}"
 MODEL="${STUDY_AI_AGENT_MODEL:-default}"
 PROMPT="$(cat analysis/nightly.md)"
