@@ -402,6 +402,10 @@ export default function StatsPage() {
         分析
       </Typography>
 
+      <Button component={Link} href="/reports" variant="outlined" size="small" sx={{ mb: 2 }}>
+        vaultレポート・弱点カルテを見る
+      </Button>
+
       {configError && (
         <Alert severity="warning" sx={{ mb: 2 }}>
           {configError}
