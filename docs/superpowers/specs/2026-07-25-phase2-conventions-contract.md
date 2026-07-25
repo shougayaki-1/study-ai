@@ -170,7 +170,9 @@ export async function deletePlanBlock(date, id);
   「番号を選んで答える」プレーンテキスト形式で書く（`analysis/nightly.md` と同じ方針）。
 - 冒頭に共通の前提（`STUDY_AI_VAULT_DIR` の解決、未設定なら書き込まない、
   書き込みは `analysis/helpers/*.mjs` のシェル実行経由、最後に必ず書いた内容を要約提示）を置く。
-- `CLAUDE.md` と `AGENTS.md` の双方に、この手順書を参照する一文を追記する（計画1で実施）。
+- `CLAUDE.md` と `AGENTS.md` の双方に、この手順書を参照する一文を置く（計画1で実施）。
+  **リポジトリルートにはどちらも存在しない**（既存の`CLAUDE.md`はユーザーのグローバル設定
+  `~/.claude/CLAUDE.md`であり、リポジトリの一部ではない）ため、計画1が両ファイルを新規作成する。
 
 ## 5. Web ルートの担当分け
 
@@ -190,6 +192,9 @@ export async function deletePlanBlock(date, id);
   `/records` 表示検証に差し替える → **計画1**
 - `e2e/extended-flows.spec.ts`: 履歴の編集/削除と `/schedule` 操作の部分を、vaultフィクスチャに
   対する `/schedule` 表示＋予定の完了タップ検証に差し替える → **計画2**
+- `e2e/core-flows.spec.ts` の3件目「締切予定を作成して編集できる」（旧`/schedule`の追加・編集UIを操作）:
+  計画1は`/schedule`を担当しないため手つかずで残す。**`/schedule`を読み取り専用にする計画2が削除する**
+  （計画2のTask 17）。この受け渡しを守らないと計画2の最終E2E実行で失敗する。
 - 既存 `e2e/fixtures/vault/` に `records/`・`schedule.md`・`plans/` のフィクスチャを追加する
   （Phase 1 の `e2e/vault-reports.spec.ts` と同じ流儀。`STUDY_AI_VAULT_DIR` はシェル環境変数で渡す）
 
