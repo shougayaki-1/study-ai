@@ -238,6 +238,9 @@ export default function SchedulePage() {
 
   const loadEvents = useCallback(async () => {
     try {
+      // ログイン直後はクライアントのセッション初期化が非同期で完了するため、
+      // 完了を待ってからクエリを発行しないと(特に初回ログイン時に)401相当のエラーになる。
+      await supabase.auth.getSession();
       const { data, error } = await supabase
         .from("events")
         .select("id, kind, title, due_date, done, event_subjects(subject_id), event_units(unit_id)")

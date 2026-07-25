@@ -23,6 +23,9 @@ Supabase側のセットアップ:
 
 `.env.local` が未設定でも `npm run build` は通るようにしてあるが、実際のログイン・データ取得にはSupabaseの接続情報が必須。
 
+`/karte`(弱点カルテ)画面はvaultディレクトリ(Googleドライブ同期フォルダ内の`vault/`)を直接読み込むため、
+`.env.local` に `STUDY_AI_VAULT_DIR`(vaultの絶対パス)を設定する必要がある。未設定のまま `/karte` を開くとエラーになる。
+
 ## 品質検査
 
 ```bash

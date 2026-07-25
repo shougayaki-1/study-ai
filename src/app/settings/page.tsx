@@ -80,6 +80,9 @@ export default function SettingsPage() {
 
   const loadAll = useCallback(async () => {
     try {
+      // ログイン直後はクライアントのセッション初期化が非同期で完了するため、
+      // 完了を待ってからクエリを発行しないと(特に初回ログイン時に)401相当のエラーになる。
+      await supabase.auth.getSession();
       const [subjectsRes, unitsRes, materialsRes, materialUnitsRes] = await Promise.all([
         supabase.from("subjects").select("id, name, color, sort_order, is_target, input_profile, columns_enabled").order("sort_order"),
         supabase.from("units").select("id, subject_id, name, sort_order, is_target").order("sort_order"),

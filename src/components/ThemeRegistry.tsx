@@ -1,5 +1,6 @@
 "use client";
 
+import { usePathname } from "next/navigation";
 import CssBaseline from "@mui/material/CssBaseline";
 import { ThemeProvider } from "@mui/material/styles";
 import Box from "@mui/material/Box";
@@ -11,14 +12,18 @@ export default function ThemeRegistry({
 }: {
   children: React.ReactNode;
 }) {
+  const pathname = usePathname();
+  const hasNav = pathname !== "/login";
+
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <Box
         sx={{
           // Mobile reserves the bottom bar; desktop reserves the permanent sidebar.
-          pb: { xs: "calc(56px + env(safe-area-inset-bottom))", md: 0 },
-          ml: { md: "224px" },
+          // ナビゲーションが表示されないページ(ログイン画面など)では余白を確保しない。
+          pb: hasNav ? { xs: "calc(56px + env(safe-area-inset-bottom))", md: 0 } : 0,
+          ml: hasNav ? { md: "224px" } : 0,
           minHeight: "100dvh",
         }}
       >

@@ -63,6 +63,9 @@ export default function HomePage() {
     let active = true;
     async function load() {
       try {
+        // ログイン直後はクライアントのセッション初期化が非同期で完了するため、
+        // 完了を待ってからクエリを発行しないと(特に初回ログイン時に)401相当のエラーになる。
+        await supabase.auth.getSession();
         const today = formatLocalDate(new Date());
         const [eventsRes, tasksRes, reportRes] = await Promise.all([
           supabase

@@ -2,13 +2,29 @@ import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
 import Stack from "@mui/material/Stack";
 import Paper from "@mui/material/Paper";
+import Alert from "@mui/material/Alert";
 import Link from "next/link";
 import { listKarteSubjects } from "./_lib/list-subjects";
 
 export const dynamic = "force-dynamic";
 
 export default async function KartePage() {
-  const subjects = await listKarteSubjects();
+  let subjects: string[];
+  try {
+    subjects = await listKarteSubjects();
+  } catch {
+    return (
+      <Box sx={{ p: 2, pb: 10, maxWidth: 560, mx: "auto" }}>
+        <Typography variant="h6" fontWeight={700} sx={{ mb: 2 }}>
+          弱点カルテ
+        </Typography>
+        <Alert severity="error">
+          カルテを取得できませんでした。環境変数 STUDY_AI_VAULT_DIR
+          (vaultディレクトリの絶対パス)が設定されているか確認してください。
+        </Alert>
+      </Box>
+    );
+  }
 
   return (
     <Box sx={{ p: 2, pb: 10, maxWidth: 560, mx: "auto" }}>

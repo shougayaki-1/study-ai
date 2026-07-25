@@ -1,6 +1,7 @@
 import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
 import Paper from "@mui/material/Paper";
+import Alert from "@mui/material/Alert";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { readVaultFile } from "@/lib/vault";
@@ -14,7 +15,23 @@ export default async function KarteSubjectPage({
 }) {
   const { subject } = await params;
   const subjectName = decodeURIComponent(subject);
-  const { body } = await readVaultFile(`subjects/${subjectName}/弱点カルテ.md`);
+
+  let body: string;
+  try {
+    ({ body } = await readVaultFile(`subjects/${subjectName}/弱点カルテ.md`));
+  } catch {
+    return (
+      <Box sx={{ p: 2, pb: 10, maxWidth: 560, mx: "auto" }}>
+        <Typography variant="h6" fontWeight={700} sx={{ mb: 2 }}>
+          {subjectName} 弱点カルテ
+        </Typography>
+        <Alert severity="error">
+          カルテを取得できませんでした。環境変数 STUDY_AI_VAULT_DIR
+          (vaultディレクトリの絶対パス)が設定されているか確認してください。
+        </Alert>
+      </Box>
+    );
+  }
 
   return (
     <Box sx={{ p: 2, pb: 10, maxWidth: 560, mx: "auto" }}>
