@@ -34,3 +34,19 @@ test('writeVaultFile creates nested directories and readVaultFile round-trips it
     else process.env.STUDY_AI_VAULT_DIR = original;
   }
 });
+
+test('readVaultFile throws when relPath escapes the vault root', async () => {
+  const vaultDir = await mkdtemp(path.join(tmpdir(), 'vault-rw-'));
+  const original = process.env.STUDY_AI_VAULT_DIR;
+  process.env.STUDY_AI_VAULT_DIR = vaultDir;
+  try {
+    await assert.rejects(
+      () => readVaultFile('../outside.md'),
+      /escapes vault root/
+    );
+  } finally {
+    await rm(vaultDir, { recursive: true, force: true });
+    if (original === undefined) delete process.env.STUDY_AI_VAULT_DIR;
+    else process.env.STUDY_AI_VAULT_DIR = original;
+  }
+});

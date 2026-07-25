@@ -4,8 +4,12 @@ import { parseFrontmatter, stringifyFrontmatter } from './frontmatter.mjs';
 import { vaultRoot } from './root.mjs';
 
 export async function readVaultFile(relPath) {
-  const fullPath = path.join(vaultRoot(), relPath);
-  const raw = await readFile(fullPath, 'utf8');
+  const root = vaultRoot();
+  const full = path.resolve(root, relPath);
+  if (full !== path.resolve(root) && !full.startsWith(path.resolve(root) + path.sep)) {
+    throw new Error('relPath escapes vault root: ' + relPath);
+  }
+  const raw = await readFile(full, 'utf8');
   const { frontmatter, body } = parseFrontmatter(raw);
   return { frontmatter, body, raw };
 }

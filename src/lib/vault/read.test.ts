@@ -43,4 +43,10 @@ describe("readVaultFile", () => {
     expect(result.body).toBe("# 弱点カルテ\n\n本文...");
     expect(result.raw).toBe(raw);
   });
+
+  it("throws when relPath escapes the vault root", async () => {
+    await expect(readVaultFile("../outside.md")).rejects.toThrow(
+      /escapes vault root/
+    );
+  });
 });

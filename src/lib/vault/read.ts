@@ -6,8 +6,12 @@ import { getVaultRoot } from "./root";
 export async function readVaultFile(
   relPath: string
 ): Promise<{ frontmatter: Record<string, unknown>; body: string; raw: string }> {
-  const fullPath = path.join(getVaultRoot(), relPath);
-  const raw = await readFile(fullPath, "utf8");
+  const root = getVaultRoot();
+  const full = path.resolve(root, relPath);
+  if (full !== path.resolve(root) && !full.startsWith(path.resolve(root) + path.sep)) {
+    throw new Error("relPath escapes vault root: " + relPath);
+  }
+  const raw = await readFile(full, "utf8");
   const { frontmatter, body } = parseFrontmatter(raw);
   return { frontmatter, body, raw };
 }
