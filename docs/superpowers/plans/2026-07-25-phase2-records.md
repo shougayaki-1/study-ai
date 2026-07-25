@@ -4,48 +4,198 @@
 
 **Goal:** 対話(Claude Code / Codex)から勉強記録を`vault/records/YYYY-MM-DD.md`へ追記・編集・削除できるようにし、`/records`をvault読みの履歴ビューアに置き換える。
 
-**Architecture:** Node側(`analysis/helpers/vault/study-sessions.mjs`)が記録行のパース/フォーマット/追記/編集/削除を担う書き込み専用実装、TS側(`src/lib/vault/study-sessions.ts`)が同じ行フォーマットを読むだけの実装を持つ。両者は同一フィクスチャ文字列で解釈結果が一致することをテストで担保する。対話は`analysis/helpers/`直下の薄いCLIラッパー(`record-session.mjs`等)をシェル経由で呼ぶ。Webは`/records`がServer Componentとして`vault/records/*.md`を`fs`で読むだけになり、`/record`(入力フォーム)は削除する。
+**Architecture:** Node側(`analysis/helpers/vault/study-sessions.mjs`)が記録行のパース/フォーマット/追記/編集/削除を担う書き込み専用実装、TS側(`src/lib/vault/study-sessions.ts`)が同じ行フォーマットを読むだけの実装を持つ。両者は同一フィクスチャファイルで解釈結果が一致することをテストで担保する。追記・編集・削除は本文をパース結果から再生成せず、対象行だけを操作する行保存型のライタとして実装する。対話は`analysis/helpers/`直下の薄いCLIラッパー(`record-session.mjs`等)をシェル経由で呼び、入口で値の妥当性を検査する。Webは`/records`がServer Componentとして`vault/records/*.md`を`fs`で読むだけになり、`/record`(入力フォーム)は削除する。既存の`writeVaultFile`もこの計画でアトミック書き込みに変更し、Phase 1からの全呼び出し元がその恩恵を受ける。
 
 **Tech Stack:** Next.js (App Router, Server Components) / TypeScript / Node.js標準ライブラリ(`node:fs/promises`, `node:test`) / Vitest / Playwright
 
 ## Global Constraints
 
 - vaultルートは Phase 1 と同じ環境変数 **`STUDY_AI_VAULT_DIR`**。未設定なら throw（黙って別パスに書かない）。
-- **TS実装（`src/lib/vault/`）と Node実装（`analysis/helpers/vault/`）は同一フォーマットを完全に同じ構造へ解釈すること。** 同一フィクスチャ文字列を両テストに置いて検証する（Phase 1 と同じ方式）。
+- **TS実装（`src/lib/vault/`）と Node実装（`analysis/helpers/vault/`）は同一フォーマットを完全に同じ構造へ解釈すること。** 同一フィクスチャファイル（`analysis/test/fixtures/study-record.md`）を両テストがそのまま`readFileSync`で読み込んで検証する(コピペしない)。加えて両実装の解釈結果が一致することを検証するparityテストを1本用意する。
 - Node側は **Node標準ライブラリのみ**（追加npm禁止）。TS側の fs アクセスは**サーバ側のみ**。
 - 既存ヘルパ（`vaultRoot`/`getVaultRoot`/`readVaultFile`/`writeVaultFile`/`parseFrontmatter`/`stringifyFrontmatter`）は**再実装せず import して使う**。
-- 行フォーマットの区切りは Phase 1 の要確認TODO行と同じ流儀：フィールドは **` | `**、`key=value` は**最初の `=` で分割**。値に ` | ` や `=` は含められない。
+- 行フォーマットの区切りは Phase 1 の要確認TODO行と同じ流儀：フィールドは **` | `**、`key=value` は**最初の `=` で分割**。**値に含めてはならないのは ` | ` と改行の2つだけ**（`=`は含めてよい。最初の`=`で分割するため`memo=y=mx+b`は正しく`y=mx+b`と解釈される）。**この禁止はコードで強制する**：`formatStudySessionLine`が値に` | `または改行を検出したら throw する。プロンプト(`docs/study-dialogue.md`)の注意書きだけに頼らない。
 - 壊れた行・必須キー欠落の行は**その行だけスキップ**し、全体を落とさない。
+- **ライタは認識できない行を保存する(破壊しない)。** `appendStudySession`/`updateStudySession`/`deleteStudySession`は本文をパース結果から再生成せず、`body.split("\n")`して対象行だけを挿入・差し替え・削除し、他の行(壊れた行・人間が書き足した見出しやメモ)はそのまま残す。
 - `records/YYYY-MM-DD.md`の行頭は **`- `**（チェックボックスなし）。キー順固定：`id` `subject` `minutes` `kind`（`kind=common_test`のときのみ`year` `section`）`understanding` `memo`。`id`は`s-<連番>`。
+- `listStudyRecordDates`は**ファイル名が`^\d{4}-\d{2}-\d{2}\.md$`に一致するものだけ**を日付として扱う(Googleドライブが競合時に作る`2026-07-25 (1).md`等を除外する)。
+- CLIラッパー(`record-session.mjs`/`edit-session.mjs`)の入口で、`subject`は13科目allowlist、`kind`/`understanding`は各enum、`date`は`YYYY-MM-DD`を検査し、外れたら throw する(黙って書かない)。
+- `writeVaultFile`(`analysis/helpers/vault/read-write.mjs`)は同一ディレクトリに一時ファイルを書いて`rename`するアトミック書き込みに変更する。Phase 1からの既存呼び出し元すべて(karte/reportsなど)がこの変更の恩恵を受ける。
 
 ---
 
-## Task 1: TS側 — 記録のパース/フォーマット(`src/lib/vault/study-sessions.ts`)
+## Task 1: Node側 — `writeVaultFile` をアトミック書き込みに変更(`analysis/helpers/vault/read-write.mjs`)
 
 **Files:**
+- Modify: `analysis/helpers/vault/read-write.mjs`
+- Modify: `analysis/test/vault-read-write.test.mjs`
+
+**Interfaces:**
+- Consumes: 既存の`vaultRoot`(`./root.mjs`)、`parseFrontmatter`/`stringifyFrontmatter`(`./frontmatter.mjs`)。いずれも変更しない。
+- Produces: `writeVaultFile(relPath, frontmatter, body)`の**外部シグネチャは維持したまま**、内部実装を「同一ディレクトリに一時ファイルを書いて`rename`」方式に変更する。Task 7(`appendStudySession`等)・Task 12(E2Eフィクスチャの書き込み)、および既存の全呼び出し元(Phase 1の`archive.mjs`/`corrections.mjs`等)がこの変更の恩恵を受ける。
+
+### ステップ
+
+このTaskは「途中でプロセスが落ちた場合にファイルが切り詰められた状態で残らない」という性質を検証するもので、確定的な失敗を起こす単体テストを書きにくい(実際にディスク書き込み中にプロセスを殺す必要がある)。そのため他のTaskと異なり「現状把握→実装→検証→commit」の形にする(Task 11・12の全文置換と同じ扱い)。
+
+1. 現状を確認する。
+
+```bash
+cat analysis/helpers/vault/read-write.mjs
+```
+
+現在の`writeVaultFile`は`mkdir`してから`writeFile`で直接書き込んでいる(一時ファイルを経由しない)ことを確認する。
+
+2. `analysis/test/vault-read-write.test.mjs`に検証テストを追記する(1本目は「同時に2回書いても中身が混ざらない」ことを見るtorn-write検出テスト、2本目は「書き込み後に一時ファイルが残らない」ことを見るテスト)。
+
+```js
+// analysis/test/vault-read-write.test.mjs に追記
+// (先頭のimportに readdir を追加する: import { mkdtemp, rm, readFile, readdir } from 'node:fs/promises';)
+
+test('writeVaultFile writes atomically: concurrent writes never produce a torn/mixed file', async () => {
+  const vaultDir = await mkdtemp(path.join(tmpdir(), 'vault-rw-atomic-'));
+  const original = process.env.STUDY_AI_VAULT_DIR;
+  process.env.STUDY_AI_VAULT_DIR = vaultDir;
+  try {
+    const frontmatter = { type: 'karte', schema_version: 1 };
+    const bodyA = 'A'.repeat(2_000_000);
+    const bodyB = 'B'.repeat(2_000_000);
+
+    await Promise.all([
+      writeVaultFile('race.md', frontmatter, bodyA),
+      writeVaultFile('race.md', frontmatter, bodyB),
+    ]);
+
+    const raw = await readFile(path.join(vaultDir, 'race.md'), 'utf8');
+    const isFullyA = raw.includes(bodyA) && !raw.includes('B');
+    const isFullyB = raw.includes(bodyB) && !raw.includes('A');
+    assert.ok(isFullyA || isFullyB, 'written file must be entirely one write or the other, never a mix');
+  } finally {
+    await rm(vaultDir, { recursive: true, force: true });
+    if (original === undefined) delete process.env.STUDY_AI_VAULT_DIR;
+    else process.env.STUDY_AI_VAULT_DIR = original;
+  }
+});
+
+test('writeVaultFile leaves no leftover temp files after a successful write', async () => {
+  const vaultDir = await mkdtemp(path.join(tmpdir(), 'vault-rw-tmp-'));
+  const original = process.env.STUDY_AI_VAULT_DIR;
+  process.env.STUDY_AI_VAULT_DIR = vaultDir;
+  try {
+    await writeVaultFile('note.md', { type: 'karte', schema_version: 1 }, 'body');
+    const entries = await readdir(vaultDir);
+    assert.deepEqual(entries, ['note.md']);
+  } finally {
+    await rm(vaultDir, { recursive: true, force: true });
+    if (original === undefined) delete process.env.STUDY_AI_VAULT_DIR;
+    else process.env.STUDY_AI_VAULT_DIR = original;
+  }
+});
+```
+
+3. 実行して現状の実装でも通ることを確認する(この2本は将来のリグレッション防止が目的であり、必ずしも赤くはならない)。
+
+```bash
+node --test analysis/test/vault-read-write.test.mjs
+```
+
+4. `writeVaultFile`を一時ファイル+`rename`方式に書き換える。
+
+```js
+// analysis/helpers/vault/read-write.mjs
+import { mkdir, readFile, writeFile, rename, unlink } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import path from 'node:path';
+import { parseFrontmatter, stringifyFrontmatter } from './frontmatter.mjs';
+import { vaultRoot } from './root.mjs';
+
+export async function readVaultFile(relPath) {
+  const root = vaultRoot();
+  const full = path.resolve(root, relPath);
+  if (full !== path.resolve(root) && !full.startsWith(path.resolve(root) + path.sep)) {
+    throw new Error('relPath escapes vault root: ' + relPath);
+  }
+  const raw = await readFile(full, 'utf8');
+  const { frontmatter, body } = parseFrontmatter(raw);
+  return { frontmatter, body, raw };
+}
+
+export async function writeVaultFile(relPath, frontmatter, body) {
+  const fullPath = path.join(vaultRoot(), relPath);
+  const dir = path.dirname(fullPath);
+  await mkdir(dir, { recursive: true });
+  const raw = stringifyFrontmatter(frontmatter, body);
+  const tmpPath = path.join(dir, `.${path.basename(fullPath)}.tmp-${randomUUID()}`);
+  await writeFile(tmpPath, raw, 'utf8');
+  try {
+    await rename(tmpPath, fullPath);
+  } catch (error) {
+    await unlink(tmpPath).catch(() => {});
+    throw error;
+  }
+}
+```
+
+5. 成功を確認する(Phase 1からの既存テストを含め全て通ることを確認する)。
+
+```bash
+node --test analysis/test/vault-read-write.test.mjs
+npm run test:analysis
+```
+
+期待する出力: いずれもエラーなく完了する(`# fail 0`)。
+
+6. コミットする。
+
+```bash
+git add analysis/helpers/vault/read-write.mjs analysis/test/vault-read-write.test.mjs
+git commit -m "$(cat <<'EOF'
+fix(vault): make writeVaultFile write atomically via temp-file + rename
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
+
+## Task 2: 共有フィクスチャ + TS側 — 記録のパース/フォーマット(`src/lib/vault/study-sessions.ts`)
+
+**Files:**
+- Create: `analysis/test/fixtures/study-record.md`
 - Create: `src/lib/vault/study-sessions.ts`
 - Create: `src/lib/vault/study-sessions.test.ts`
 
 **Interfaces:**
 - Consumes: なし(新規ファイル)。
-- Produces: `StudyKind`, `Understanding`, `StudySession`型、`parseStudySessions(body: string): StudySession[]`、`formatStudySessionLine(session: StudySession): string`。Task 2・Task 3・計画1の他タスクが利用する。
+- Produces: `StudyKind`, `Understanding`, `StudySession`型、`parseStudySessions(body: string): StudySession[]`、`formatStudySessionLine(session: StudySession): string`。Task 3・Task 4・Task 5・Task 6の他タスクが利用する。
 
 ### ステップ
 
-1. 失敗するテストを書く。
+1. 共有フィクスチャを作成する(TSテスト・Nodeテスト・parityテストの3箇所が同じファイルを読む。契約1aの例と同一内容)。
+
+```md
+<!-- analysis/test/fixtures/study-record.md -->
+## セッション
+- id=s-1 | subject=英語R | minutes=60 | kind=material | understanding=understood | memo=長文2題
+- id=s-2 | subject=数学IA | minutes=90 | kind=common_test | year=2025 | section=第3問 | understanding=uncertain | memo=
+```
+
+2. 失敗するテストを書く。
 
 ```ts
 // src/lib/vault/study-sessions.test.ts
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parseStudySessions, formatStudySessionLine, type StudySession } from "./study-sessions";
 
-// NOTE: analysis/test/vault-study-sessions.test.mjs の同名テストと
-//       BODY文字列が一字一句同一 (契約: TS版とNode版でパース結果を完全一致させる)
-const BODY = [
-  "## セッション",
-  "- id=s-1 | subject=英語R | minutes=60 | kind=material | understanding=understood | memo=長文2題",
-  "- id=s-2 | subject=数学IA | minutes=90 | kind=common_test | year=2025 | section=第3問 | understanding=uncertain | memo=",
-].join("\n");
+// NOTE: フィクスチャは analysis/test/fixtures/study-record.md を直接読む。
+//       analysis/test/vault-study-sessions.test.mjs も同じファイルを読むため、
+//       コピペしてBODY文字列を二重管理しない(契約: TS版とNode版でパース結果を完全一致させる)。
+const REPO_ROOT = path.join(fileURLToPath(new URL(".", import.meta.url)), "../../..");
+const BODY = readFileSync(path.join(REPO_ROOT, "analysis/test/fixtures/study-record.md"), "utf8");
 
 describe("parseStudySessions", () => {
   it("parses session lines including the common_test-only year/section", () => {
@@ -111,10 +261,46 @@ describe("formatStudySessionLine", () => {
       "- id=s-2 | subject=数学IA | minutes=90 | kind=common_test | year=2025 | section=第3問 | understanding=uncertain | memo="
     );
   });
+
+  it("throws when a field value contains the ' | ' delimiter", () => {
+    const session: StudySession = {
+      id: "s-1",
+      subject: "英語R",
+      minutes: 60,
+      kind: "material",
+      understanding: "understood",
+      memo: "長文2題 | 時間切れ",
+    };
+    expect(() => formatStudySessionLine(session)).toThrow();
+  });
+
+  it("throws when a field value contains a newline", () => {
+    const session: StudySession = {
+      id: "s-1",
+      subject: "英語R",
+      minutes: 60,
+      kind: "material",
+      understanding: "understood",
+      memo: "1行目\n2行目",
+    };
+    expect(() => formatStudySessionLine(session)).toThrow();
+  });
+
+  it("allows '=' in a field value", () => {
+    const session: StudySession = {
+      id: "s-1",
+      subject: "英語R",
+      minutes: 60,
+      kind: "material",
+      understanding: "understood",
+      memo: "y=mx+b",
+    };
+    expect(formatStudySessionLine(session)).toContain("memo=y=mx+b");
+  });
 });
 ```
 
-2. 失敗を確認する。
+3. 失敗を確認する。
 
 ```bash
 npx vitest run src/lib/vault/study-sessions.test.ts
@@ -122,7 +308,7 @@ npx vitest run src/lib/vault/study-sessions.test.ts
 
 期待する出力: `Cannot find module './study-sessions'` またはそれに類するインポートエラーでテストが失敗する。
 
-3. 最小実装を書く。
+4. 最小実装を書く。
 
 ```ts
 // src/lib/vault/study-sessions.ts
@@ -171,7 +357,19 @@ export function parseStudySessions(body: string): StudySession[] {
   return sessions;
 }
 
+function assertSafeValue(value: string): void {
+  if (value.includes(" | ") || value.includes("\n")) {
+    throw new Error(`study session field value must not contain ' | ' or a newline: ${JSON.stringify(value)}`);
+  }
+}
+
 export function formatStudySessionLine(session: StudySession): string {
+  assertSafeValue(session.id);
+  assertSafeValue(session.subject);
+  assertSafeValue(session.understanding);
+  assertSafeValue(session.memo);
+  if (session.kind === "common_test" && session.section) assertSafeValue(session.section);
+
   const parts = [
     `id=${session.id}`,
     `subject=${session.subject}`,
@@ -186,18 +384,18 @@ export function formatStudySessionLine(session: StudySession): string {
 }
 ```
 
-4. 成功を確認する。
+5. 成功を確認する。
 
 ```bash
 npx vitest run src/lib/vault/study-sessions.test.ts
 ```
 
-期待する出力: `Test Files  1 passed (1)` / `Tests  5 passed (5)`。
+期待する出力: `Test Files  1 passed (1)` / `Tests  8 passed (8)`。
 
-5. コミットする。
+6. コミットする。
 
 ```bash
-git add src/lib/vault/study-sessions.ts src/lib/vault/study-sessions.test.ts
+git add analysis/test/fixtures/study-record.md src/lib/vault/study-sessions.ts src/lib/vault/study-sessions.test.ts
 git commit -m "$(cat <<'EOF'
 feat(vault): add TS parser/formatter for study record session lines
 
@@ -208,15 +406,15 @@ EOF
 
 ---
 
-## Task 2: TS側 — `readStudyRecord` / `listStudyRecordDates`
+## Task 3: TS側 — `readStudyRecord` / `listStudyRecordDates`
 
 **Files:**
 - Modify: `src/lib/vault/study-sessions.ts`
 - Modify: `src/lib/vault/study-sessions.test.ts`
 
 **Interfaces:**
-- Consumes: `readVaultFile`(`./read`)、`getVaultRoot`(`./root`)、Task 1の`parseStudySessions`。
-- Produces: `StudyRecordDay`型、`readStudyRecord(date: string): Promise<StudyRecordDay>`、`listStudyRecordDates(): Promise<string[]>`。Task 3のバレル・`/records`ページ(Task 9)が利用する。
+- Consumes: `readVaultFile`(`./read`)、`getVaultRoot`(`./root`)、Task 2の`parseStudySessions`。
+- Produces: `StudyRecordDay`型、`readStudyRecord(date: string): Promise<StudyRecordDay>`、`listStudyRecordDates(): Promise<string[]>`。Task 4のバレル・`/records`ページ(Task 11)が利用する。
 
 ### ステップ
 
@@ -226,7 +424,6 @@ EOF
 // src/lib/vault/study-sessions.test.ts に追記
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import path from "node:path";
 import { afterEach, beforeEach } from "vitest";
 import { readStudyRecord, listStudyRecordDates } from "./study-sessions";
 
@@ -289,6 +486,16 @@ describe("readStudyRecord / listStudyRecordDates", () => {
   it("returns an empty array when the records directory does not exist", async () => {
     expect(await listStudyRecordDates()).toEqual([]);
   });
+
+  it("ignores files whose name does not match YYYY-MM-DD.md (e.g. Google Drive conflict copies)", async () => {
+    const dir = path.join(vaultDir, "records");
+    await mkdir(dir, { recursive: true });
+    await writeFile(path.join(dir, "2026-07-25.md"), "---\ntype: study-record\ndate: 2026-07-25\nsource: dialogue\nschema_version: 1\nupdated: 2026-07-25T00:00:00+09:00\n---\n\n## セッション\n", "utf8");
+    await writeFile(path.join(dir, "2026-07-25 (1).md"), "---\ntype: study-record\ndate: 2026-07-25\nsource: dialogue\nschema_version: 1\nupdated: 2026-07-25T00:00:01+09:00\n---\n\n## セッション\n", "utf8");
+    await writeFile(path.join(dir, "notes.txt"), "memo", "utf8");
+
+    expect(await listStudyRecordDates()).toEqual(["2026-07-25"]);
+  });
 });
 ```
 
@@ -311,6 +518,8 @@ import { getVaultRoot } from "./root";
 
 export type StudyRecordDay = { date: string; sessions: StudySession[] };
 
+const RECORD_FILENAME_RE = /^\d{4}-\d{2}-\d{2}\.md$/;
+
 export async function readStudyRecord(date: string): Promise<StudyRecordDay> {
   try {
     const { body } = await readVaultFile(`records/${date}.md`);
@@ -331,7 +540,7 @@ export async function listStudyRecordDates(): Promise<string[]> {
     throw error;
   }
   return entries
-    .filter((name) => name.endsWith(".md"))
+    .filter((name) => RECORD_FILENAME_RE.test(name))
     .map((name) => name.slice(0, -3))
     .sort((a, b) => (a < b ? 1 : a > b ? -1 : 0));
 }
@@ -343,7 +552,7 @@ export async function listStudyRecordDates(): Promise<string[]> {
 npx vitest run src/lib/vault/study-sessions.test.ts
 ```
 
-期待する出力: `Tests  9 passed (9)`。
+期待する出力: `Tests  13 passed (13)`。
 
 5. コミットする。
 
@@ -359,15 +568,15 @@ EOF
 
 ---
 
-## Task 3: TS側 — バレル再エクスポート
+## Task 4: TS側 — バレル再エクスポート
 
 **Files:**
 - Modify: `src/lib/vault/index.ts`
 - Modify: `src/lib/vault/index.test.ts`
 
 **Interfaces:**
-- Consumes: Task 1・2の全エクスポート。
-- Produces: `@/lib/vault`から`StudyKind`/`Understanding`/`StudySession`/`StudyRecordDay`/`parseStudySessions`/`formatStudySessionLine`/`readStudyRecord`/`listStudyRecordDates`をimport可能にする。Task 9(`/records`ページ)が利用する。
+- Consumes: Task 2・3の全エクスポート。
+- Produces: `@/lib/vault`から`StudyKind`/`Understanding`/`StudySession`/`StudyRecordDay`/`parseStudySessions`/`formatStudySessionLine`/`readStudyRecord`/`listStudyRecordDates`をimport可能にする。Task 11(`/records`ページ)が利用する。
 
 ### ステップ
 
@@ -419,15 +628,15 @@ EOF
 
 ---
 
-## Task 4: Node側 — 記録のパース/フォーマット/採番(`analysis/helpers/vault/study-sessions.mjs`)
+## Task 5: Node側 — 記録のパース/フォーマット/採番(`analysis/helpers/vault/study-sessions.mjs`)
 
 **Files:**
 - Create: `analysis/helpers/vault/study-sessions.mjs`
 - Create: `analysis/test/vault-study-sessions.test.mjs`
 
 **Interfaces:**
-- Consumes: なし(新規ファイル)。
-- Produces: `parseStudySessions(body)`、`formatStudySessionLine(session)`、`nextSessionId(sessions)`。Task 5・6・7が利用する。TS版(Task 1)と同一フィクスチャで解釈結果が一致することをここで検証する。
+- Consumes: Task 2で作成した共有フィクスチャ`analysis/test/fixtures/study-record.md`。
+- Produces: `parseStudySessions(body)`、`formatStudySessionLine(session)`、`nextSessionId(sessions)`。Task 6・7・9が利用する。TS版(Task 2)と同一フィクスチャで解釈結果が一致することはTask 6のparityテストで検証する。
 
 ### ステップ
 
@@ -437,15 +646,15 @@ EOF
 // analysis/test/vault-study-sessions.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { parseStudySessions, formatStudySessionLine, nextSessionId } from '../helpers/vault/study-sessions.mjs';
 
-// NOTE: src/lib/vault/study-sessions.test.ts の parseStudySessions/formatStudySessionLine
-//       テストとBODY/期待値が一字一句同一 (契約: TS版とNode版でパース結果を完全一致させる)
-const BODY = [
-  '## セッション',
-  '- id=s-1 | subject=英語R | minutes=60 | kind=material | understanding=understood | memo=長文2題',
-  '- id=s-2 | subject=数学IA | minutes=90 | kind=common_test | year=2025 | section=第3問 | understanding=uncertain | memo=',
-].join('\n');
+// NOTE: src/lib/vault/study-sessions.test.ts と同じ analysis/test/fixtures/study-record.md を
+//       readFileSync で直接読む(コピペしない。契約: TS版とNode版でパース結果を完全一致させる)。
+const FIXTURE_DIR = path.dirname(fileURLToPath(import.meta.url));
+const BODY = readFileSync(path.join(FIXTURE_DIR, 'fixtures', 'study-record.md'), 'utf8');
 
 test('parseStudySessions parses session lines including the common_test-only year/section', () => {
   assert.deepEqual(parseStudySessions(BODY), [
@@ -505,6 +714,25 @@ test('formatStudySessionLine formats a common_test session with year/section', (
   assert.equal(line, '- id=s-2 | subject=数学IA | minutes=90 | kind=common_test | year=2025 | section=第3問 | understanding=uncertain | memo=');
 });
 
+test('formatStudySessionLine throws when a value contains the field delimiter', () => {
+  assert.throws(() => formatStudySessionLine({
+    id: 's-1', subject: '英語R', minutes: 60, kind: 'material', understanding: 'understood', memo: '長文2題 | 時間切れ',
+  }));
+});
+
+test('formatStudySessionLine throws when a value contains a newline', () => {
+  assert.throws(() => formatStudySessionLine({
+    id: 's-1', subject: '英語R', minutes: 60, kind: 'material', understanding: 'understood', memo: '1行目\n2行目',
+  }));
+});
+
+test('formatStudySessionLine allows "=" in a value', () => {
+  const line = formatStudySessionLine({
+    id: 's-1', subject: '英語R', minutes: 60, kind: 'material', understanding: 'understood', memo: 'y=mx+b',
+  });
+  assert.match(line, /memo=y=mx\+b/);
+});
+
 test('nextSessionId returns s-1 for an empty list and max+1 otherwise', () => {
   assert.equal(nextSessionId([]), 's-1');
   assert.equal(nextSessionId([{ id: 's-1' }, { id: 's-2' }]), 's-3');
@@ -555,7 +783,19 @@ export function parseStudySessions(body) {
   return sessions;
 }
 
+function assertSafeValue(value) {
+  if (typeof value === 'string' && (value.includes(' | ') || value.includes('\n'))) {
+    throw new Error(`study session field value must not contain ' | ' or a newline: ${JSON.stringify(value)}`);
+  }
+}
+
 export function formatStudySessionLine(session) {
+  assertSafeValue(session.id);
+  assertSafeValue(session.subject);
+  assertSafeValue(session.understanding);
+  assertSafeValue(session.memo);
+  if (session.kind === 'common_test' && session.section) assertSafeValue(session.section);
+
   const parts = [
     `id=${session.id}`,
     `subject=${session.subject}`,
@@ -585,7 +825,7 @@ export function nextSessionId(sessions) {
 node --test analysis/test/vault-study-sessions.test.mjs
 ```
 
-期待する出力: `# pass 6` (6テストすべて成功、failが0)。
+期待する出力: `# pass 9` (9テストすべて成功、failが0)。
 
 5. コミットする。
 
@@ -601,15 +841,72 @@ EOF
 
 ---
 
-## Task 5: Node側 — `appendStudySession` / `updateStudySession` / `deleteStudySession`
+## Task 6: TS/Node parityテスト(記録フォーマット)
+
+**Files:**
+- Modify: `src/lib/vault/study-sessions.test.ts`
+
+**Interfaces:**
+- Consumes: Task 2の`parseStudySessions`(TS)、Task 5の`analysis/helpers/vault/study-sessions.mjs`の`parseStudySessions`(Node)、共有フィクスチャ(Task 2)。
+- Produces: なし(検証専用テスト)。TS版とNode版のパース結果が将来ズレたときにここで検知する。
+
+### ステップ
+
+1. 失敗しない可能性があることを踏まえつつ、まずテストを追記する(現時点でTask 2とTask 5の実装は同一ロジックのため通る想定だが、契約が要求するparity担保の実体としてここに置く)。
+
+> **この機構は検証済み**: vitest(`src/**/*.test.ts`)から `pathToFileURL` 経由で
+> `analysis/` 配下の `.mjs` を動的importできることは、既存の `analysis/helpers/vault/frontmatter.mjs`
+> を使った使い捨てテストで実機確認済み(2026-07-26)。`vitest.config.ts` の
+> `include: ["src/**/*.test.ts"]` と `environment: "node"` の設定で追加設定なしに動く。
+
+```ts
+// src/lib/vault/study-sessions.test.ts に追記
+import { pathToFileURL } from "node:url";
+
+describe("TS/Node parity", () => {
+  it("parses the shared study-record fixture identically in both implementations", async () => {
+    const nodeModulePath = path.join(REPO_ROOT, "analysis/helpers/vault/study-sessions.mjs");
+    const nodeModule = await import(pathToFileURL(nodeModulePath).href);
+
+    const tsResult = parseStudySessions(BODY);
+    const nodeResult = nodeModule.parseStudySessions(BODY);
+
+    expect(JSON.stringify(nodeResult)).toBe(JSON.stringify(tsResult));
+  });
+});
+```
+
+2. 実行して確認する。
+
+```bash
+npx vitest run src/lib/vault/study-sessions.test.ts
+```
+
+期待する出力: `Tests  14 passed (14)`。もし将来どちらかの実装だけを直して乖離させると、この1本だけが失敗するようになる(想定挙動)。
+
+3. コミットする。
+
+```bash
+git add src/lib/vault/study-sessions.test.ts
+git commit -m "$(cat <<'EOF'
+test(vault): add a TS/Node parity check for the shared study-record fixture
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
+
+## Task 7: Node側 — `appendStudySession` / `updateStudySession` / `deleteStudySession`(行保存型)
 
 **Files:**
 - Modify: `analysis/helpers/vault/study-sessions.mjs`
 - Modify: `analysis/test/vault-study-sessions.test.mjs`
 
 **Interfaces:**
-- Consumes: `readVaultFile`/`writeVaultFile`(`./read-write.mjs`)、Task 4の`parseStudySessions`/`formatStudySessionLine`。
-- Produces: `appendStudySession(date, session)`、`updateStudySession(date, id, patch)`、`deleteStudySession(date, id)`。Task 6のバレル・Task 7のCLIラッパーが利用する。
+- Consumes: `readVaultFile`/`writeVaultFile`(`./read-write.mjs`、Task 1でアトミック化済み)、Task 5の`parseStudySessions`/`formatStudySessionLine`。
+- Produces: `appendStudySession(date, session)`、`updateStudySession(date, id, patch)`、`deleteStudySession(date, id)`。Task 8のバレル・Task 9のCLIラッパーが利用する。**本文を再生成せず、対象行だけを操作する**(計画2の`appendScheduleEvent`と同じ方式)。
 
 ### ステップ
 
@@ -617,9 +914,8 @@ EOF
 
 ```js
 // analysis/test/vault-study-sessions.test.mjs に追記
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import path from 'node:path';
 import { appendStudySession, updateStudySession, deleteStudySession } from '../helpers/vault/study-sessions.mjs';
 
 function withVault(fn) {
@@ -690,6 +986,71 @@ test('deleteStudySession removes only the targeted line', withVault(async (dir) 
   assert.doesNotMatch(raw, /id=s-1/);
   assert.match(raw, /id=s-2/);
 }));
+
+test('appendStudySession preserves lines it cannot parse and human-added notes', withVault(async (dir) => {
+  const recordsDir = path.join(dir, 'records');
+  await mkdir(recordsDir, { recursive: true });
+  await writeFile(
+    path.join(recordsDir, '2026-07-25.md'),
+    [
+      '---',
+      'type: study-record',
+      'date: 2026-07-25',
+      'source: dialogue',
+      'schema_version: 1',
+      'updated: 2026-07-25T00:00:00+09:00',
+      '---',
+      '',
+      '## セッション',
+      '- id=s-1 | subject=英語R | minutes=60 | kind=material | understanding=understood | memo=',
+      '- id=s-broken | subject=英語R',
+      '',
+      '### 手書きメモ',
+      '今日は集中できた。',
+      '',
+    ].join('\n'),
+    'utf8'
+  );
+
+  await appendStudySession('2026-07-25', {
+    id: 's-2', subject: '数学IA', minutes: 90, kind: 'material', understanding: 'uncertain', memo: '',
+  });
+
+  const raw = await readFile(path.join(recordsDir, '2026-07-25.md'), 'utf8');
+  assert.match(raw, /- id=s-broken \| subject=英語R/);
+  assert.match(raw, /### 手書きメモ/);
+  assert.match(raw, /今日は集中できた。/);
+  assert.match(raw, /id=s-2/);
+}));
+
+test('updateStudySession preserves lines it cannot parse when rewriting a target line', withVault(async (dir) => {
+  const recordsDir = path.join(dir, 'records');
+  await mkdir(recordsDir, { recursive: true });
+  await writeFile(
+    path.join(recordsDir, '2026-07-25.md'),
+    [
+      '---',
+      'type: study-record',
+      'date: 2026-07-25',
+      'source: dialogue',
+      'schema_version: 1',
+      'updated: 2026-07-25T00:00:00+09:00',
+      '---',
+      '',
+      '## セッション',
+      '- id=s-1 | subject=英語R | minutes=60 | kind=material | understanding=understood | memo=',
+      '- id=s-broken | subject=英語R',
+      '',
+    ].join('\n'),
+    'utf8'
+  );
+
+  await updateStudySession('2026-07-25', 's-1', { minutes: 90 });
+
+  const raw = await readFile(path.join(recordsDir, '2026-07-25.md'), 'utf8');
+  assert.match(raw, /id=s-1 \| subject=英語R \| minutes=90/);
+  assert.match(raw, /- id=s-broken \| subject=英語R/);
+}));
 ```
 
 2. 失敗を確認する。
@@ -700,57 +1061,63 @@ node --test analysis/test/vault-study-sessions.test.mjs
 
 期待する出力: `appendStudySession`等が存在しないためインポートエラーで失敗する。
 
-3. 最小実装を追記する。
+3. 最小実装を追記する。**本文を`sessions.map(...).join()`で再生成するのではなく、`body.split('\n')`して対象行だけを操作する**(計画2の`schedule.mjs`の`appendScheduleEvent`/`updateScheduleEvent`/`deleteScheduleEvent`と同じ方式)。
 
 ```js
 // analysis/helpers/vault/study-sessions.mjs に追記
 import { readVaultFile, writeVaultFile } from './read-write.mjs';
 
-async function readDay(date) {
+const HEADING = '## セッション';
+
+async function readRecordFile(date) {
   const relPath = `records/${date}.md`;
   try {
     const { frontmatter, body } = await readVaultFile(relPath);
-    return { relPath, frontmatter, sessions: parseStudySessions(body) };
+    return { relPath, frontmatter, body };
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
     return {
       relPath,
       frontmatter: { type: 'study-record', date, source: 'dialogue', schema_version: 1 },
-      sessions: [],
+      body: `${HEADING}\n`,
     };
   }
 }
 
-async function writeDay(relPath, frontmatter, sessions) {
-  const updated = new Date().toISOString();
-  const body = ['## セッション', ...sessions.map((session) => formatStudySessionLine(session))].join('\n') + '\n';
-  await writeVaultFile(relPath, { ...frontmatter, updated }, body);
+function locateSessionLineIndex(lines, id) {
+  const marker = `id=${id} |`;
+  return lines.findIndex((line) => line.startsWith(PREFIX) && line.slice(PREFIX.length).startsWith(marker));
 }
 
 export async function appendStudySession(date, session) {
-  const day = await readDay(date);
-  await writeDay(day.relPath, day.frontmatter, [...day.sessions, session]);
+  const { relPath, frontmatter, body } = await readRecordFile(date);
+  const trimmed = body.endsWith('\n') ? body.slice(0, -1) : body;
+  const withHeading = trimmed.includes(HEADING) ? trimmed : `${trimmed ? `${trimmed}\n` : ''}${HEADING}`;
+  const nextBody = `${withHeading}\n${formatStudySessionLine(session)}\n`;
+  await writeVaultFile(relPath, { ...frontmatter, updated: new Date().toISOString() }, nextBody);
 }
 
 export async function updateStudySession(date, id, patch) {
-  const day = await readDay(date);
-  let found = false;
-  const sessions = day.sessions.map((session) => {
-    if (session.id !== id) return session;
-    found = true;
-    return { ...session, ...patch, id };
-  });
-  if (!found) throw new Error(`updateStudySession: session not found: ${id}`);
-  await writeDay(day.relPath, day.frontmatter, sessions);
+  const { relPath, frontmatter, body } = await readRecordFile(date);
+  const sessions = parseStudySessions(body);
+  const current = sessions.find((session) => session.id === id);
+  if (!current) throw new Error(`updateStudySession: session not found: ${id}`);
+  const updated = { ...current, ...patch, id };
+
+  const lines = body.split('\n');
+  const lineIndex = locateSessionLineIndex(lines, id);
+  if (lineIndex === -1) throw new Error(`updateStudySession: session line not found: ${id}`);
+  lines[lineIndex] = formatStudySessionLine(updated);
+  await writeVaultFile(relPath, { ...frontmatter, updated: new Date().toISOString() }, lines.join('\n'));
 }
 
 export async function deleteStudySession(date, id) {
-  const day = await readDay(date);
-  const sessions = day.sessions.filter((session) => session.id !== id);
-  if (sessions.length === day.sessions.length) {
-    throw new Error(`deleteStudySession: session not found: ${id}`);
-  }
-  await writeDay(day.relPath, day.frontmatter, sessions);
+  const { relPath, frontmatter, body } = await readRecordFile(date);
+  const lines = body.split('\n');
+  const lineIndex = locateSessionLineIndex(lines, id);
+  if (lineIndex === -1) throw new Error(`deleteStudySession: session not found: ${id}`);
+  lines.splice(lineIndex, 1);
+  await writeVaultFile(relPath, { ...frontmatter, updated: new Date().toISOString() }, lines.join('\n'));
 }
 ```
 
@@ -760,14 +1127,14 @@ export async function deleteStudySession(date, id) {
 node --test analysis/test/vault-study-sessions.test.mjs
 ```
 
-期待する出力: `# pass 10` (10テストすべて成功、failが0)。
+期待する出力: `# pass 15` (15テストすべて成功、failが0)。
 
 5. コミットする。
 
 ```bash
 git add analysis/helpers/vault/study-sessions.mjs analysis/test/vault-study-sessions.test.mjs
 git commit -m "$(cat <<'EOF'
-feat(analysis): add append/update/delete writers for study sessions
+feat(analysis): add line-preserving append/update/delete writers for study sessions
 
 Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
 EOF
@@ -776,15 +1143,15 @@ EOF
 
 ---
 
-## Task 6: Node側 — バレル再エクスポート
+## Task 8: Node側 — バレル再エクスポート
 
 **Files:**
 - Modify: `analysis/helpers/vault/index.mjs`
 - Modify: `analysis/test/vault-index.test.mjs`
 
 **Interfaces:**
-- Consumes: Task 4・5の全エクスポート。
-- Produces: `analysis/helpers/vault/index.mjs`から`parseStudySessions`/`formatStudySessionLine`/`nextSessionId`/`appendStudySession`/`updateStudySession`/`deleteStudySession`をimport可能にする。Task 7のCLIラッパーが利用する。
+- Consumes: Task 5・7の全エクスポート。
+- Produces: `analysis/helpers/vault/index.mjs`から`parseStudySessions`/`formatStudySessionLine`/`nextSessionId`/`appendStudySession`/`updateStudySession`/`deleteStudySession`をimport可能にする。Task 9のCLIラッパーが利用する。
 
 ### ステップ
 
@@ -844,9 +1211,10 @@ EOF
 
 ---
 
-## Task 7: CLIラッパー — `record-session.mjs` / `edit-session.mjs` / `delete-session.mjs`
+## Task 9: CLIラッパー — `record-session.mjs` / `edit-session.mjs` / `delete-session.mjs`(入力検査つき)
 
 **Files:**
+- Create: `analysis/helpers/study-session-validation.mjs`
 - Create: `analysis/helpers/record-session.mjs`
 - Create: `analysis/helpers/edit-session.mjs`
 - Create: `analysis/helpers/delete-session.mjs`
@@ -854,7 +1222,7 @@ EOF
 
 **Interfaces:**
 - Consumes: `analysis/helpers/vault/index.mjs`の`readVaultFile`/`parseStudySessions`/`nextSessionId`/`appendStudySession`/`updateStudySession`/`deleteStudySession`、`analysis/helpers/lib.mjs`の`printJson`。
-- Produces: 各ファイルが`run(argv)`をエクスポート(対話がシェルから`node analysis/helpers/record-session.mjs ...`等で呼ぶ)。`docs/study-dialogue.md`(Task 8)が使い方を参照する。
+- Produces: 各ファイルが`run(argv)`をエクスポート(対話がシェルから`node analysis/helpers/record-session.mjs ...`等で呼ぶ)。`docs/study-dialogue.md`(Task 10)が使い方を参照する。`study-session-validation.mjs`は契約に無い内部ヘルパで、`subject`/`kind`/`understanding`/`date`の妥当性検査を`record-session.mjs`/`edit-session.mjs`の入口で行うために両者から共有する(契約が定める公開インターフェースの名前は変更しない)。
 
 ### ステップ
 
@@ -915,6 +1283,28 @@ test('delete-session removes the targeted session', withVault(async (dir) => {
   const raw = readFileSync(path.join(dir, 'records', '2026-07-25.md'), 'utf8');
   assert.doesNotMatch(raw, /id=s-1/);
 }));
+
+test('record-session throws for an unknown subject', withVault(async () => {
+  const { run } = await import('../helpers/record-session.mjs');
+  await assert.rejects(() => run(['2026-07-25', '英語Ｒ', '60', 'material', 'understood', '']), /subject/);
+}));
+
+test('record-session throws for an invalid date', withVault(async () => {
+  const { run } = await import('../helpers/record-session.mjs');
+  await assert.rejects(() => run(['2026/07/25', '英語R', '60', 'material', 'understood', '']), /date/);
+}));
+
+test('record-session throws when memo contains the field delimiter', withVault(async () => {
+  const { run } = await import('../helpers/record-session.mjs');
+  await assert.rejects(() => run(['2026-07-25', '英語R', '60', 'material', 'understood', '長文2題 | 時間切れ']), / \| /);
+}));
+
+test('edit-session throws when the patch contains an unknown kind', withVault(async () => {
+  const { run: recordRun } = await import('../helpers/record-session.mjs');
+  const { run: editRun } = await import('../helpers/edit-session.mjs');
+  await recordRun(['2026-07-25', '英語R', '60', 'material', 'understood', '']);
+  await assert.rejects(() => editRun(['2026-07-25', 's-1', JSON.stringify({ kind: 'unknown' })]), /kind/);
+}));
 ```
 
 2. 失敗を確認する。
@@ -928,6 +1318,33 @@ node --test analysis/test/session-cli-wrappers.test.mjs
 3. 最小実装を書く。
 
 ```js
+// analysis/helpers/study-session-validation.mjs
+// record-session.mjs / edit-session.mjs の入口で使う値検査ヘルパ。契約I5対応。
+export const STUDY_SUBJECTS = [
+  '英語R', '英語L', '現代文', '古文', '漢文', '数学IA', '数学2BC',
+  '化学基礎', '地学基礎', '地理', '政治経済', '情報', '小論文',
+];
+const KINDS = ['material', 'common_test', 'secondary'];
+const UNDERSTANDINGS = ['understood', 'uncertain', 'not_understood'];
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+export function assertValidStudySessionFields({ date, subject, kind, understanding } = {}) {
+  if (date !== undefined && !DATE_RE.test(date)) {
+    throw new Error(`date must match YYYY-MM-DD: ${date}`);
+  }
+  if (subject !== undefined && !STUDY_SUBJECTS.includes(subject)) {
+    throw new Error(`subject must be one of the 13 known subjects: ${subject}`);
+  }
+  if (kind !== undefined && !KINDS.includes(kind)) {
+    throw new Error(`kind must be one of ${KINDS.join('/')}: ${kind}`);
+  }
+  if (understanding !== undefined && !UNDERSTANDINGS.includes(understanding)) {
+    throw new Error(`understanding must be one of ${UNDERSTANDINGS.join('/')}: ${understanding}`);
+  }
+}
+```
+
+```js
 // analysis/helpers/record-session.mjs
 #!/usr/bin/env node
 // vault/records/<date>.md に学習セッションを1件追記する。契約3a `appendStudySession`/`nextSessionId` のCLIラッパー。
@@ -935,11 +1352,13 @@ node --test analysis/test/session-cli-wrappers.test.mjs
 //   kind=common_test のときのみ year/section を渡す(それ以外は省略してよい)。
 import { fileURLToPath } from 'node:url';
 import { printJson } from './lib.mjs';
+import { assertValidStudySessionFields } from './study-session-validation.mjs';
 
 export async function run([date, subject, minutes, kind, understanding, memo, year, section]) {
   if (!date || !subject || !minutes || !kind || !understanding) {
     throw new Error('使い方: node helpers/record-session.mjs <date> <subject> <minutes> <kind> <understanding> <memo> [year] [section]');
   }
+  assertValidStudySessionFields({ date, subject, kind, understanding });
   const { readVaultFile, parseStudySessions, nextSessionId, appendStudySession } = await import('./vault/index.mjs');
   let existingSessions = [];
   try {
@@ -977,12 +1396,14 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 //   patchJSON は StudySession のうち書き換えたいキーのみを含むJSON(例: {"minutes":90,"memo":"やり直し"})。
 import { fileURLToPath } from 'node:url';
 import { printJson } from './lib.mjs';
+import { assertValidStudySessionFields } from './study-session-validation.mjs';
 
 export async function run([date, id, patchArg]) {
   if (!date || !id || !patchArg) {
     throw new Error('使い方: node helpers/edit-session.mjs <date> <id> <patchJSON>');
   }
   const patch = JSON.parse(patchArg);
+  assertValidStudySessionFields({ date, ...patch });
   const { updateStudySession } = await import('./vault/index.mjs');
   await updateStudySession(date, id, patch);
   return { date, id, patch };
@@ -1000,11 +1421,13 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 // 使い方: node analysis/helpers/delete-session.mjs <date> <id>
 import { fileURLToPath } from 'node:url';
 import { printJson } from './lib.mjs';
+import { assertValidStudySessionFields } from './study-session-validation.mjs';
 
 export async function run([date, id]) {
   if (!date || !id) {
     throw new Error('使い方: node helpers/delete-session.mjs <date> <id>');
   }
+  assertValidStudySessionFields({ date });
   const { deleteStudySession } = await import('./vault/index.mjs');
   await deleteStudySession(date, id);
   return { date, id, deleted: true };
@@ -1021,14 +1444,14 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 node --test analysis/test/session-cli-wrappers.test.mjs
 ```
 
-期待する出力: `# pass 4` (fail 0)。
+期待する出力: `# pass 8` (fail 0)。
 
 5. コミットする。
 
 ```bash
-git add analysis/helpers/record-session.mjs analysis/helpers/edit-session.mjs analysis/helpers/delete-session.mjs analysis/test/session-cli-wrappers.test.mjs
+git add analysis/helpers/study-session-validation.mjs analysis/helpers/record-session.mjs analysis/helpers/edit-session.mjs analysis/helpers/delete-session.mjs analysis/test/session-cli-wrappers.test.mjs
 git commit -m "$(cat <<'EOF'
-feat(analysis): add record/edit/delete-session CLI wrappers for dialogue writes
+feat(analysis): add record/edit/delete-session CLI wrappers with input validation
 
 Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
 EOF
@@ -1037,7 +1460,7 @@ EOF
 
 ---
 
-## Task 8: 対話手順書 `docs/study-dialogue.md` + `CLAUDE.md`/`AGENTS.md`参照
+## Task 10: 対話手順書 `docs/study-dialogue.md` + `CLAUDE.md`/`AGENTS.md`参照
 
 **Files:**
 - Create: `docs/study-dialogue.md`
@@ -1054,6 +1477,9 @@ EOF
 
 ```md
 # 対話での記録・予定・学習計画 手順書
+
+**この手順の質問順・選択肢を変更してはならない。** ユーザーが手順外の情報を先に出した場合も、
+すでに分かっている項目は聞き返さず、抜けている項目だけを手順の順序で聞くこと。
 
 このファイルは、Claude Code / Codex との対話で「今日の記録つけて」「予定に追加して」
 「明日の計画立てて」等と言われたときに読み込む手順書である。
@@ -1076,6 +1502,19 @@ docs/superpowers/specs/2026-07-25-vault-dialogue-records-schedule-design.md の
 
 ## 記録フロー(「今日の記録つけて」等)
 
+### 高速パス(まとめて1行で言われた場合)
+
+ユーザーが「英語R 60 教材 理解した」「数学IA 90 共通2025第3問 曖昧」のように
+**科目・時間・種別・理解度をひとまとめに1行(または科目ごとに1行)で言った場合は、
+以降の番号選択の質問を省略し、そのまま解釈して書き込み内容の要約提示だけ行う**
+(対象日は明示が無ければ今日とする)。あいまいで解釈できない項目だけ、
+下記の番号選択フローで**その項目だけ**を聞き返す。
+
+以下の番号選択フローは、ユーザーが科目名だけ言った場合や、高速パスで
+解釈できなかった項目があった場合の**フォールバック**として使う。
+
+### 番号選択フロー(聞き返しが必要なとき)
+
 1. 科目を聞く。以下13科目を番号付きで提示し、スペース区切りで複数選択してよいことを伝える。
 
    ```
@@ -1090,8 +1529,8 @@ docs/superpowers/specs/2026-07-25-vault-dialogue-records-schedule-design.md の
    2. 時間: `1) 30分 2) 60分 3) 90分 4) 120分 5) その他(分数を直接入力)`
    3. 理解度: `1) 理解した 2) 曖昧 3) 理解できてない`
    4. メモ: 任意。スキップしてよい。
-      **メモに` | `や`=`を含めることはできない**(vaultの行フォーマットが壊れるため)。
-      含まれていたら全角に置き換えるか、別の言い方に直してもらう。
+      **メモに` | `や改行を含めることはできない**(vaultの行フォーマットが壊れるため。
+      `=`は含めてよい)。含まれていたら別の言い方に直してもらう。
 
 3. 対象日(既定は今日、`YYYY-MM-DD`)を確認する。
 
@@ -1109,6 +1548,24 @@ docs/superpowers/specs/2026-07-25-vault-dialogue-records-schedule-design.md の
 
 6. 各コマンドの標準出力(JSON)から書き込まれた`session`を確認し、最後に
    「何を書いたか」を要約して提示する。
+
+### 複数日分をまとめて入れる場合
+
+「昨日と今日の記録をまとめて」のように複数日分をまとめて言われた場合は、
+対象日ごとに上記フローを繰り返す(高速パスで解釈できるならその日ごとに要約だけ出す)。
+コマンド実行(ステップ5)は日付・科目の組み合わせごとに1回ずつ行う。
+
+### 後から思い出して直す場合
+
+「そういえば昨日も英語やってた、追加しといて」のように後から過去の日付に
+追記したい場合も記録フローと同じ手順で進める。対象日(ステップ3)を過去の日付に
+読み替えるだけでよい。
+
+### やってはいけないこと
+
+- vaultのファイルを直接編集しない(`analysis/helpers/*.mjs`経由のみ)。
+- ユーザーの確認前に書き込みコマンドを実行しない。
+- メモに` | `や改行を入れない(スクリプトがエラーで拒否するので、言い直してもらう)。
 
 ## 記録の編集・削除フロー(「さっきの記録直して」「今日の記録消して」等)
 
@@ -1137,6 +1594,12 @@ docs/superpowers/specs/2026-07-25-vault-dialogue-records-schedule-design.md の
 
 4. 結果(JSON)を確認し、何を変更/削除したかを要約して提示する。
 
+### やってはいけないこと
+
+- vaultのファイルを直接編集しない(`analysis/helpers/*.mjs`経由のみ)。
+- ユーザーの確認前に編集・削除コマンドを実行しない。
+- メモに` | `や改行を入れない。
+
 ## 予定フロー(「予定に追加して」「予定確認して」等)
 
 (計画2が追記する。予定・締切の追加/一覧/変更/削除フローをここに書く。)
@@ -1154,9 +1617,9 @@ docs/superpowers/specs/2026-07-25-vault-dialogue-records-schedule-design.md の
 このリポジトリで対話エージェント(Claude Code / Codex CLI)として作業する際の
 参照先をまとめる。
 
-- 勉強記録・予定・学習計画をユーザーとの対話で追加/編集/削除する場合は、
-  必ず `docs/study-dialogue.md` の手順書に従うこと(vaultへの書き込みは
-  `analysis/helpers/*.mjs` 経由に限る。ファイルを直接編集しない)。
+- 勉強記録・予定・学習計画の話題が出たら、**まず`docs/study-dialogue.md`を読み**、
+  その手順書に従うこと(vaultへの書き込みは`analysis/helpers/*.mjs`経由に限る。
+  ファイルを直接編集しない)。
 - 夜間分析バッチについては `analysis/nightly.md` を参照。
 - vaultのファイル規約は `docs/superpowers/specs/2026-07-24-vault-conventions-contract.md`
   および `docs/superpowers/specs/2026-07-25-phase2-conventions-contract.md` を参照。
@@ -1169,9 +1632,9 @@ docs/superpowers/specs/2026-07-25-vault-dialogue-records-schedule-design.md の
 
 このリポジトリでClaude Codeとして作業する際の参照先をまとめる。
 
-- 勉強記録・予定・学習計画をユーザーとの対話で追加/編集/削除する場合は、
-  必ず `docs/study-dialogue.md` の手順書に従うこと(vaultへの書き込みは
-  `analysis/helpers/*.mjs` 経由に限る。ファイルを直接編集しない)。
+- 勉強記録・予定・学習計画の話題が出たら、**まず`docs/study-dialogue.md`を読み**、
+  その手順書に従うこと(vaultへの書き込みは`analysis/helpers/*.mjs`経由に限る。
+  ファイルを直接編集しない)。
 - 夜間分析バッチについては `analysis/nightly.md` を参照。
 - vaultのファイル規約は `docs/superpowers/specs/2026-07-24-vault-conventions-contract.md`
   および `docs/superpowers/specs/2026-07-25-phase2-conventions-contract.md` を参照。
@@ -1190,7 +1653,7 @@ test -f docs/study-dialogue.md && test -f AGENTS.md && test -f CLAUDE.md && echo
 ```bash
 git add docs/study-dialogue.md AGENTS.md CLAUDE.md
 git commit -m "$(cat <<'EOF'
-docs: add study-dialogue.md skeleton and reference it from AGENTS.md/CLAUDE.md
+docs: add study-dialogue.md with a fast path and enforcement wording, reference it from AGENTS.md/CLAUDE.md
 
 Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
 EOF
@@ -1201,22 +1664,23 @@ EOF
 
 ---
 
-## Task 9: Web — `/records`をvault読みビューアに置き換え、`/record`削除、BottomNav更新
+## Task 11: Web — `/records`をvault読みビューアに置き換え、`/record`削除、BottomNav更新、E2E破損分の始末
 
 **Files:**
 - Modify: `src/app/records/page.tsx`
 - Delete: `src/app/record/` ディレクトリ一式(`src/app/record/page.tsx`ほか)
 - Modify: `src/components/BottomNav.tsx`
+- Modify: `e2e/extended-flows.spec.ts`
 
 **Interfaces:**
-- Consumes: `@/lib/vault`の`listStudyRecordDates`/`readStudyRecord`(Task 3)、既存`@/lib/study-session`の`RECORD_TYPE_LABELS`、既存`@/lib/learning`の`UNDERSTANDING_LABELS`(キー集合が契約の`StudyKind`/`Understanding`と完全一致するため、表示ラベルとして再利用する。契約の型・関数名は変更しない)。
-- Produces: なし(ページ・ナビゲーションの末端コンポーネント)。Task 10(E2E)がこの表示を検証する。
+- Consumes: `@/lib/vault`の`listStudyRecordDates`/`readStudyRecord`/`StudyRecordDay`(Task 4)、既存`@/lib/study-session`の`RECORD_TYPE_LABELS`、既存`@/lib/learning`の`UNDERSTANDING_LABELS`(キー集合が契約の`StudyKind`/`Understanding`と完全一致するため、表示ラベルとして再利用する。契約の型・関数名は変更しない)。
+- Produces: なし(ページ・ナビゲーションの末端コンポーネント)。Task 12(E2E)がこの表示を検証する。
 
 ### ステップ
 
 このタスクはページ全文置き換えのためTDDではなく「全文掲載→検証コマンド→commit」の形にする。
 
-1. `src/app/records/page.tsx`を以下の内容で全置換する。
+1. `src/app/records/page.tsx`を以下の内容で全置換する。**1日分の読み込みが失敗しても他の日の表示を道連れにしない**よう、日ごとに`try/catch`する(frontmatter破損などで`readStudyRecord`が想定外にthrowしても、その日だけ「読み込めませんでした」と控えめに表示し、ページ全体は500にしない)。
 
 ```tsx
 import Box from "@mui/material/Box";
@@ -1224,11 +1688,18 @@ import Typography from "@mui/material/Typography";
 import Stack from "@mui/material/Stack";
 import Paper from "@mui/material/Paper";
 import Chip from "@mui/material/Chip";
-import { listStudyRecordDates, readStudyRecord, type StudySession } from "@/lib/vault";
+import {
+  listStudyRecordDates,
+  readStudyRecord,
+  type StudyRecordDay,
+  type StudySession,
+} from "@/lib/vault";
 import { RECORD_TYPE_LABELS } from "@/lib/study-session";
 import { UNDERSTANDING_LABELS } from "@/lib/learning";
 
 export const dynamic = "force-dynamic";
+
+type DayResult = { status: "ok"; day: StudyRecordDay } | { status: "error"; date: string };
 
 function sessionDetailLine(session: StudySession): string {
   if (session.kind === "common_test") {
@@ -1239,20 +1710,42 @@ function sessionDetailLine(session: StudySession): string {
 
 export default async function RecordsPage() {
   const dates = await listStudyRecordDates();
-  const days = await Promise.all(dates.map((date) => readStudyRecord(date)));
+  const results: DayResult[] = await Promise.all(
+    dates.map(async (date): Promise<DayResult> => {
+      try {
+        return { status: "ok", day: await readStudyRecord(date) };
+      } catch {
+        return { status: "error", date };
+      }
+    })
+  );
 
   return (
     <Box sx={{ p: 2, pb: 10, maxWidth: 560, mx: "auto" }}>
       <Typography variant="h6" fontWeight={700} sx={{ mb: 2 }}>
         履歴
       </Typography>
-      {days.length === 0 && (
+      {results.length === 0 && (
         <Typography variant="body2" color="text.secondary">
           まだ学習記録がありません。
         </Typography>
       )}
       <Stack spacing={3}>
-        {days.map((day) => {
+        {results.map((result) => {
+          if (result.status === "error") {
+            return (
+              <Paper key={result.date} variant="outlined" sx={{ p: 1.5 }}>
+                <Typography variant="subtitle2" color="text.secondary">
+                  {result.date}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  この日の記録を読み込めませんでした。
+                </Typography>
+              </Paper>
+            );
+          }
+
+          const day = result.day;
           const bySubject = new Map<string, number>();
           for (const session of day.sessions) {
             bySubject.set(session.subject, (bySubject.get(session.subject) ?? 0) + session.minutes);
@@ -1341,7 +1834,40 @@ import EditNoteIcon from "@mui/icons-material/EditNote";
 `MOBILE_TABS`は先頭4件(`NAV_ITEMS.slice(0, 4)`)のロジックのまま変更不要
 (結果として今日/履歴/分析/予定の4タブになる)。
 
-4. 検証する。
+4. `e2e/extended-flows.spec.ts`から1件目のテスト(「履歴の記録を編集して削除できる」、`/record`へ`goto`するため`/record`削除と同時に壊れる)を削除する。**自分が壊したテストは自分のTask内で始末する**。2件目「繰り返し時間割を作成できる」・3件目「週の学習時間を保存できる」は計画2の担当(前者は削除、後者は`/stats`の唯一のE2Eカバレッジとして保全)のため触らない。
+
+```ts
+// e2e/extended-flows.spec.ts を以下の内容で全置換する(1件目のテストのみ削除)
+import { expect, test } from "@playwright/test";
+
+test("繰り返し時間割を作成できる", async ({ page }) => {
+  const memo = `E2E時間割-${crypto.randomUUID()}`;
+  // plan_blocks are only rendered for the currently selected date, and the
+  // recurring plan only creates rows on the chosen weekdays starting today.
+  // Pick today's weekday chip so the first generated block lands on the
+  // already-selected date (today) and is visible without navigating.
+  const weekdayLabels = ["日", "月", "火", "水", "木", "金", "土"];
+  const todayLabel = weekdayLabels[new Date().getDay()];
+
+  await page.goto("/schedule");
+  await page.getByRole("button", { name: "時間割" }).click();
+  await page.getByRole("button", { name: "追加" }).click();
+  await page.getByRole("button", { name: "毎週繰り返し" }).click();
+  await page.getByText(todayLabel, { exact: true }).last().click();
+  await page.getByLabel("メモ（任意）").fill(memo);
+  await page.getByRole("button", { name: "保存" }).click();
+  await expect(page.getByText(memo, { exact: true }).first()).toBeVisible();
+});
+
+test("週の学習時間を保存できる", async ({ page }) => {
+  await page.goto("/stats");
+  await page.getByLabel("週合計（分）").fill("345");
+  await page.getByRole("button", { name: "保存" }).first().click();
+  await expect(page.getByText("週次振り返り・来週の重点")).toBeVisible();
+});
+```
+
+5. 検証する。
 
 ```bash
 npx tsc --noEmit
@@ -1350,12 +1876,16 @@ npm run lint
 
 期待する出力: どちらもエラー0件で終了する(`tsc`は無出力で終了コード0、`lint`は`✔ No ESLint warnings or errors`相当)。
 
-5. コミットする。
+6. コミットする。
 
 ```bash
-git add src/app/records/page.tsx src/components/BottomNav.tsx
+git add src/app/records/page.tsx src/components/BottomNav.tsx e2e/extended-flows.spec.ts
 git commit -m "$(cat <<'EOF'
 feat(web): replace /records with a vault-backed viewer, drop /record and its nav tab
+
+Also removes the extended-flows E2E test that exercised the now-deleted
+/record page (own the E2E breakage caused by this task; the other two
+tests in that spec remain plan2's responsibility).
 
 Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
 EOF
@@ -1364,14 +1894,14 @@ EOF
 
 ---
 
-## Task 10: E2E — `e2e/core-flows.spec.ts`改廃 + vaultフィクスチャ追加
+## Task 12: E2E — `e2e/core-flows.spec.ts`改廃 + vaultフィクスチャ追加
 
 **Files:**
 - Modify: `e2e/core-flows.spec.ts`
 - Create: `e2e/fixtures/vault/records/2026-07-24.md`
 
 **Interfaces:**
-- Consumes: Task 9の`/records`ページ、既存`e2e/fixtures/vault/`ディレクトリ構成。
+- Consumes: Task 11の`/records`ページ、既存`e2e/fixtures/vault/`ディレクトリ構成。
 - Produces: なし(E2Eテストの末端)。
 
 ### ステップ
@@ -1436,15 +1966,13 @@ test("締切予定を作成して編集できる", async ({ page }) => {
 });
 ```
 
-3. 検証する。
+3. 検証する。**この計画(計画1)が保証できるのは新設した2件だけであり、3件目「締切予定を作成して編集できる」は`/schedule`(計画2の担当領域)に依存するため、`--grep`で新設した2件だけを対象に実行し、結果を確定させる。**
 
 ```bash
-STUDY_AI_VAULT_DIR="$(pwd)/e2e/fixtures/vault" npm run test:e2e -- e2e/core-flows.spec.ts
+STUDY_AI_VAULT_DIR="$(pwd)/e2e/fixtures/vault" npm run test:e2e -- e2e/core-flows.spec.ts --grep "主要画面を認証済みで表示できる|vaultフィクスチャの学習記録が履歴に表示される"
 ```
 
-期待する出力: `2 passed`と`1 passed`のいずれか(実行環境に既存Supabaseデータがあれば3件目は
-挙動未変更のため従来どおり通る想定)。少なくとも新設した2件(`主要画面を認証済みで表示できる`、
-`vaultフィクスチャの学習記録が履歴に表示される`)が失敗しないこと。
+期待する出力: `2 passed`。
 
 4. コミットする。
 
@@ -1472,5 +2000,5 @@ npm run lint
 STUDY_AI_VAULT_DIR="$(pwd)/e2e/fixtures/vault" npm run test:e2e -- e2e/core-flows.spec.ts e2e/vault-reports.spec.ts
 ```
 
-`e2e/extended-flows.spec.ts`・`e2e/atomicity.spec.ts`・`/schedule`・`/`(今日)・push通知一式・
+`e2e/extended-flows.spec.ts`の残り2件(繰り返し時間割・週の学習時間、計画2の担当)・`e2e/atomicity.spec.ts`・`/schedule`・`/`(今日)・push通知一式・
 過去データ移行スクリプトは計画2・計画3の担当であり、本計画では変更しない。
