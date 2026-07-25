@@ -1,4 +1,5 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, rename, unlink } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { parseFrontmatter, stringifyFrontmatter } from './frontmatter.mjs';
 import { vaultRoot } from './root.mjs';
@@ -16,7 +17,15 @@ export async function readVaultFile(relPath) {
 
 export async function writeVaultFile(relPath, frontmatter, body) {
   const fullPath = path.join(vaultRoot(), relPath);
-  await mkdir(path.dirname(fullPath), { recursive: true });
+  const dir = path.dirname(fullPath);
+  await mkdir(dir, { recursive: true });
   const raw = stringifyFrontmatter(frontmatter, body);
-  await writeFile(fullPath, raw, 'utf8');
+  const tmpPath = path.join(dir, `.${path.basename(fullPath)}.tmp-${randomUUID()}`);
+  await writeFile(tmpPath, raw, 'utf8');
+  try {
+    await rename(tmpPath, fullPath);
+  } catch (error) {
+    await unlink(tmpPath).catch(() => {});
+    throw error;
+  }
 }
