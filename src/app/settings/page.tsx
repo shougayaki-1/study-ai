@@ -31,7 +31,6 @@ import ArrowUpwardIcon from "@mui/icons-material/ArrowUpward";
 import ArrowDownwardIcon from "@mui/icons-material/ArrowDownward";
 import { useSupabase } from "@/lib/supabase/use-client";
 import { MATERIAL_KINDS } from "@/lib/constants";
-import { isPushSupported, urlBase64ToUint8Array } from "@/lib/push";
 import { throwIfSupabaseError } from "@/lib/supabase/error";
 
 export const dynamic = "force-dynamic";
@@ -60,11 +59,6 @@ export default function SettingsPage() {
   const [materials, setMaterials] = useState<Material[]>([]);
   const [materialUnits, setMaterialUnits] = useState<Array<{ material_id: string; unit_id: string }>>([]);
   const [selectedSubjectId, setSelectedSubjectId] = useState<string>("");
-
-  const [pushEnabled, setPushEnabled] = useState(false);
-  const [pushSupported, setPushSupported] = useState(false);
-  const [pushBusy, setPushBusy] = useState(false);
-  const [pushError, setPushError] = useState<string | null>(null);
 
   const [dialogKind, setDialogKind] = useState<"subject" | "unit" | "material" | null>(null);
   const [newName, setNewName] = useState("");
@@ -111,65 +105,6 @@ export default function SettingsPage() {
   useEffect(() => {
     loadAll();
   }, [loadAll]);
-
-  useEffect(() => {
-    if (!isPushSupported()) return;
-    setPushSupported(true);
-    navigator.serviceWorker.ready
-      .then((registration) => registration.pushManager.getSubscription())
-      .then((sub) => {
-        setPushEnabled(!!sub);
-      })
-      .catch(() => {
-        // 取得失敗時は未購読扱いのままにする
-      });
-  }, []);
-
-  const togglePush = async (checked: boolean) => {
-    setPushError(null);
-    setPushBusy(true);
-    try {
-      const registration = await navigator.serviceWorker.ready;
-
-      if (checked) {
-        const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
-        if (!vapidPublicKey) {
-          throw new Error("VAPID公開鍵が設定されていません(.env.local を確認してください)");
-        }
-        const permission = await Notification.requestPermission();
-        if (permission !== "granted") {
-          throw new Error("通知が許可されませんでした");
-        }
-        const subscription = await registration.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
-        });
-        const json = subscription.toJSON();
-        if (!json.endpoint || !json.keys) throw new Error("通知購読情報を取得できませんでした");
-        const { error } = await supabase.from("push_subscriptions").upsert(
-          {
-            endpoint: json.endpoint,
-            keys_json: json.keys,
-          },
-          { onConflict: "endpoint" },
-        );
-        if (error) throw error;
-        setPushEnabled(true);
-      } else {
-        const subscription = await registration.pushManager.getSubscription();
-        if (subscription) {
-          const { error } = await supabase.from("push_subscriptions").delete().eq("endpoint", subscription.endpoint);
-          throwIfSupabaseError(error);
-          await subscription.unsubscribe();
-        }
-        setPushEnabled(false);
-      }
-    } catch (e) {
-      setPushError(e instanceof Error ? e.message : "通知の設定に失敗しました");
-    } finally {
-      setPushBusy(false);
-    }
-  };
 
   const unitsForSubject = useMemo(
     () =>
@@ -538,31 +473,6 @@ export default function SettingsPage() {
           )}
         </Paper>
 
-        <Paper variant="outlined" sx={{ p: 2 }}>
-          <Stack direction="row" alignItems="center" justifyContent="space-between">
-            <Box>
-              <Typography variant="subtitle2">通知(Push)</Typography>
-              <Typography variant="caption" color="text.secondary">
-                毎朝の復習提案と夜の記録リマインド（配信時刻は前後することがあります）
-              </Typography>
-            </Box>
-            <Switch
-              checked={pushEnabled}
-              onChange={(e) => togglePush(e.target.checked)}
-              disabled={!pushSupported || pushBusy}
-            />
-          </Stack>
-          {!pushSupported && (
-            <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
-              このブラウザはPush通知に対応していません。iPhoneはホーム画面に追加してから利用してください。
-            </Typography>
-          )}
-          {pushError && (
-            <Alert severity="error" sx={{ mt: 1 }}>
-              {pushError}
-            </Alert>
-          )}
-        </Paper>
         <Paper variant="outlined" sx={{ p: 2 }}>
           <Typography variant="subtitle2">夜間分析バッチの起動プロンプト</Typography>
           <Typography variant="caption" color="text.secondary">
