@@ -10,5 +10,9 @@ describe("vault barrel export", () => {
     expect(typeof vault.listReports).toBe("function");
     expect(typeof vault.parseConfirmTodos).toBe("function");
     expect(typeof vault.appendCorrection).toBe("function");
+    expect(typeof vault.parseStudySessions).toBe("function");
+    expect(typeof vault.formatStudySessionLine).toBe("function");
+    expect(typeof vault.readStudyRecord).toBe("function");
+    expect(typeof vault.listStudyRecordDates).toBe("function");
   });
 });

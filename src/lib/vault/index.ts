@@ -7,3 +7,5 @@ export type { ReportMeta } from "./reports";
 export { listReports } from "./reports";
 export type { CorrectionEntry } from "./corrections";
 export { appendCorrection } from "./corrections";
+export type { StudyKind, Understanding, StudySession, StudyRecordDay } from "./study-sessions";
+export { parseStudySessions, formatStudySessionLine, readStudyRecord, listStudyRecordDates } from "./study-sessions";
