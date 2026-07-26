@@ -46,3 +46,64 @@ export function nextEventId(events) {
   }, 0);
   return `ev-${max + 1}`;
 }
+
+const HEADING = '## 予定';
+const ANY_HEADING_RE = /^#{1,6}\s/;
+
+async function readScheduleFile() {
+  try { return await readVaultFile('schedule.md'); }
+  catch (error) {
+    if (error.code === 'ENOENT') return { frontmatter: { type: 'schedule', schema_version: 1 }, body: `${HEADING}\n` };
+    throw error;
+  }
+}
+
+function locateLineIndex(lines, id) {
+  const marker = `id=${id} |`;
+  return lines.findIndex((line) => {
+    const rest = line.startsWith(DONE_PREFIX) ? line.slice(DONE_PREFIX.length) : line.startsWith(TODO_PREFIX) ? line.slice(TODO_PREFIX.length) : null;
+    return rest !== null && rest.startsWith(marker);
+  });
+}
+
+function locateSectionInsertIndex(lines) {
+  const headingIndex = lines.findIndex((line) => line.trim() === HEADING);
+  if (headingIndex === -1) return -1;
+  let insertAt = headingIndex + 1;
+  for (let i = headingIndex + 1; i < lines.length; i += 1) {
+    if (ANY_HEADING_RE.test(lines[i])) break;
+    if (lines[i].trim() !== '') insertAt = i + 1;
+  }
+  return insertAt;
+}
+
+export async function appendScheduleEvent(event) {
+  const { frontmatter, body } = await readScheduleFile();
+  const lines = body.split('\n');
+  const insertAt = locateSectionInsertIndex(lines);
+  const line = formatScheduleEventLine(event);
+  const nextLines = insertAt === -1
+    ? `${body.endsWith('\n') ? body.slice(0, -1) : body}${body.trim() ? '\n' : ''}${HEADING}\n${line}\n`.split('\n')
+    : [...lines.slice(0, insertAt), line, ...lines.slice(insertAt)];
+  await writeVaultFile('schedule.md', { ...frontmatter, updated: new Date().toISOString() }, nextLines.join('\n'));
+}
+
+export async function updateScheduleEvent(id, patch) {
+  const { frontmatter, body } = await readScheduleFile();
+  const current = parseScheduleEvents(body).find((event) => event.id === id);
+  if (!current) throw new Error(`schedule event not found: ${id}`);
+  const lines = body.split('\n');
+  const index = locateLineIndex(lines, id);
+  if (index === -1) throw new Error(`schedule event line not found: ${id}`);
+  lines[index] = formatScheduleEventLine({ ...current, ...patch, id });
+  await writeVaultFile('schedule.md', { ...frontmatter, updated: new Date().toISOString() }, lines.join('\n'));
+}
+
+export async function deleteScheduleEvent(id) {
+  const { frontmatter, body } = await readScheduleFile();
+  const lines = body.split('\n');
+  const index = locateLineIndex(lines, id);
+  if (index === -1) throw new Error(`schedule event line not found: ${id}`);
+  lines.splice(index, 1);
+  await writeVaultFile('schedule.md', { ...frontmatter, updated: new Date().toISOString() }, lines.join('\n'));
+}
