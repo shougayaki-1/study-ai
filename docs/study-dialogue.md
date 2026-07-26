@@ -81,10 +81,14 @@
 - ユーザーの確認前に編集・削除コマンドを実行しない。
 - メモに` | `や改行を入れない。`=`は許可する。
 
-## 予定フロー（「予定に追加して」「予定確認して」等）
+## 予定フロー
 
-（計画2が追記する。）
+「予定に追加して」「予定確認して」等では、種別（1)課題 2)出願 3)模試 4)本番 5)その他）、タイトル、締切日（`YYYY-MM-DD`）を順に確認する。タイトルには` | `・改行を含めない。`=`は許可する。
 
-## 学習計画フロー（「明日の計画立てて」等）
+確定後は `node analysis/helpers/add-event.mjs "<kind>" "<title>" "<due>"` を実行し、追加内容を要約する。一覧は `node analysis/helpers/read-vault-file.mjs schedule.md` でid付き表示し、変更は `edit-event.mjs <id> '<patchJSON>'`、削除は `delete-event.mjs <id>` を使う。完了切替はWebの`/schedule`で行う。
 
-（計画2が追記する。）
+## 学習計画フロー
+
+対象日（既定は翌日）、開始・終了時刻（`HH:MM`、終了は開始より後）、科目、任意メモを確認する。確定後は `node analysis/helpers/add-plan-block.mjs "<date>" "<start>" "<end>" "<subject>" "<memo>"` を実行し、日付・時刻・科目を要約する。複数日は各日ごとに実体行として追加する。
+
+更新時は `node analysis/helpers/read-vault-file.mjs plans/<date>.md` でid付き表示し、`edit-plan-block.mjs <date> <id> '<patchJSON>'` または `delete-plan-block.mjs <date> <id>` を使う。statusは`done`または`skipped`にできる。
