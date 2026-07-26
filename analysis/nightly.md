@@ -44,8 +44,10 @@ codex exec --sandbox workspace-write \
 
 作業ディレクトリはリポジトリルート。**`analysis/` 以外のディレクトリ(`src/` 等)は
 一切変更しないこと。** `npm install` や `npm run build` も実行しないこと(このバッチは
-Node標準機能のみで完結する)。**Supabaseへは一切アクセスしない**(勉強時間の手入力などは
-Web側が引き続きSupabaseを使うが、夜間バッチの担当外)。
+Node標準機能のみで完結する)。**Supabaseへは、手順7のvaultミラー同期(`sync-vault-to-supabase.mjs`)を除いて
+アクセスしない。** その同期は`vault/`の`.md`を読み取り専用ミラーへ一方向にコピーする
+だけで、Supabaseから読んで判断材料にすることはない(分析の入力は`vault/`のみ)。
+勉強記録・予定の手入力はWeb/対話側の担当で、夜間バッチの担当外。
 
 ---
 
@@ -188,7 +190,17 @@ Web側が引き続きSupabaseを使うが、夜間バッチの担当外)。
 
 ### 7. ラン完了
 
-1. `analysis/tmp/run-summary.json`を作成する。形式:
+1. **Vaultミラー同期**: `node analysis/helpers/sync-vault-to-supabase.mjs` を実行し、`vault/`配下の
+   `.md`ファイルをSupabaseの`vault_files`テーブル(読み取り専用ミラー、外出先からのWeb閲覧用)へ
+   反映する。変更があったファイルだけ`upsert`し、`vault/`から消えたファイルはミラーからも削除する。
+   **このコマンドが失敗しても後続の手順(手順2・3)を止めない。** 手順1〜6は既にvaultへの書き込みを
+   完了しているため、同期の失敗はデータ損失にならない。失敗した場合はエラー内容を控えておき、
+   手順2の`run-summary.json`の`lines`に`"Vaultミラー同期に失敗しました(次回再試行): <エラー内容>"`
+   を追加する(バッチ全体の`status`は`ok`のまま。次回実行時に差分がまとめて同期される、冪等な
+   スクリプトなので二重反映の心配はない)。成功した場合は`lines`に
+   `"Vaultミラー同期: 追加{added}件/更新{updated}件/削除{deleted}件"`
+   (`sync-vault-to-supabase.mjs`の標準出力JSONの`added`/`updated`/`deleted`)を追加する。
+2. `analysis/tmp/run-summary.json`を作成する。形式:
    ```json
    {
      "processed": 5,
@@ -198,15 +210,17 @@ Web側が引き続きSupabaseを使うが、夜間バッチの担当外)。
        "誤答ログ更新: 日本史(2件)、数学(1件)",
        "カルテ差分更新: 日本史、数学",
        "訂正反映: 2件(または: 訂正指示なし)",
-       "保存したレポート: daily(daily+weeklyの場合はその旨)"
+       "保存したレポート: daily(daily+weeklyの場合はその旨)",
+       "Vaultミラー同期: 追加2件/更新3件/削除0件(または: Vaultミラー同期に失敗しました(次回再試行): <エラー内容>)"
      ]
    }
    ```
    `processed`は手順3で仕分け(誤答ログ追記 or 正解のみでスキップ)した総エントリ数、
    `needsConfirmation`は要確認TODOの件数を入れる。
-2. `node analysis/helpers/finish-run.mjs "$TODAY" ok analysis/tmp/run-summary.json`
+3. `node analysis/helpers/finish-run.mjs "$TODAY" ok analysis/tmp/run-summary.json`
    を実行し、`runs/$TODAY.md`に完了報告を追記する(途中で回復不能なエラーが起きた場合は
-   `ok`の代わりに`error`を指定し、`lines`にエラー内容を含める)。
+   `ok`の代わりに`error`を指定し、`lines`にエラー内容を含める。**Vaultミラー同期の失敗単独では
+   `error`にしない**。手順1〜6のいずれかで回復不能なエラーが起きた場合のみ`error`にする)。
 3. 標準出力(実行ログ)に、以下を簡潔にまとめて出力して終了する:
    - 処理したInboxエントリの件数(仕分け完了 / 要確認 内訳)
    - 更新した科目(誤答ログ・カルテ)の一覧
