@@ -1,4 +1,8 @@
 import { assertSafeValue } from "./line-format";
+import { readdir } from "node:fs/promises";
+import path from "node:path";
+import { readVaultFile } from "./read";
+import { getVaultRoot } from "./root";
 
 export type StudyKind = "material" | "common_test" | "secondary";
 export type Understanding = "understood" | "uncertain" | "not_understood";
@@ -14,6 +18,9 @@ export type StudySession = {
 };
 
 const PREFIX = "- ";
+const RECORD_FILENAME_RE = /^\d{4}-\d{2}-\d{2}\.md$/;
+
+export type StudyRecordDay = { date: string; sessions: StudySession[] };
 
 export function parseStudySessions(body: string): StudySession[] {
   const sessions: StudySession[] = [];
@@ -63,4 +70,26 @@ export function formatStudySessionLine(session: StudySession): string {
   }
   parts.push(`understanding=${session.understanding}`, `memo=${session.memo}`);
   return `${PREFIX}${parts.join(" | ")}`;
+}
+
+export async function readStudyRecord(date: string): Promise<StudyRecordDay> {
+  try {
+    const { body } = await readVaultFile(`records/${date}.md`);
+    return { date, sessions: parseStudySessions(body) };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { date, sessions: [] };
+    throw error;
+  }
+}
+
+export async function listStudyRecordDates(): Promise<string[]> {
+  const dir = path.join(getVaultRoot(), "records");
+  let entries: string[];
+  try {
+    entries = await readdir(dir);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
+  return entries.filter((name) => RECORD_FILENAME_RE.test(name)).map((name) => name.slice(0, -3)).sort((a, b) => (a < b ? 1 : a > b ? -1 : 0));
 }
