@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { listKarteSubjects } from "./list-subjects";
+import { listKarteSubjects, listKarteSubjectsFromSupabase } from "./list-subjects";
 
 describe("listKarteSubjects", () => {
   let vaultDir: string;
@@ -28,5 +28,24 @@ describe("listKarteSubjects", () => {
   it("returns an empty array when the subjects directory does not exist", async () => {
     await rm(path.join(vaultDir, "subjects"), { recursive: true, force: true });
     expect(await listKarteSubjects()).toEqual([]);
+  });
+});
+
+describe("listKarteSubjectsFromSupabase", () => {
+  it("extracts unique subject directory names from subjects/ prefixed paths", async () => {
+    const client = {
+      selectByPath: async () => null,
+      selectByPrefix: async () => [],
+      selectPathsByPrefix: async (prefix: string) => {
+        expect(prefix).toBe("subjects/");
+        return [
+          "subjects/日本史/弱点カルテ.md",
+          "subjects/日本史/誤答ログ.md",
+          "subjects/世界史/弱点カルテ.md",
+          "subjects/not-a-subject.md",
+        ];
+      },
+    };
+    expect(await listKarteSubjectsFromSupabase(client)).toEqual(["世界史", "日本史"]);
   });
 });

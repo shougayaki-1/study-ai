@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { readVaultFile } from "./read";
+import { readVaultFile, readVaultFileFromSupabase } from "./read";
 
 describe("readVaultFile", () => {
   let vaultDir: string;
@@ -66,5 +66,29 @@ describe("readVaultFile", () => {
       "Unknown vault schema_version 2 in future.md; attempting a best-effort read"
     );
     warn.mockRestore();
+  });
+});
+
+describe("readVaultFileFromSupabase", () => {
+  function fakeClient(rows: Record<string, string>) {
+    return {
+      selectByPath: async (p: string) => (p in rows ? { path: p, content: rows[p] } : null),
+      selectByPrefix: async () => [],
+      selectPathsByPrefix: async () => [],
+    };
+  }
+
+  it("parses row content the same way readVaultFile parses a local file", async () => {
+    const raw = ["---", "type: schedule", "schema_version: 1", "---", "", "## 予定"].join("\n");
+    const result = await readVaultFileFromSupabase("schedule.md", fakeClient({ "schedule.md": raw }));
+    expect(result.frontmatter.type).toBe("schedule");
+    expect(result.body).toBe("## 予定");
+    expect(result.raw).toBe(raw);
+  });
+
+  it("throws an ENOENT error when the path is not in the mirror", async () => {
+    await expect(readVaultFileFromSupabase("missing.md", fakeClient({}))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
   });
 });

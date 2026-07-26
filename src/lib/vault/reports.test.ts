@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { listReports } from "./reports";
+import { listReports, listReportsFromSupabase } from "./reports";
 
 function dailyRaw(date: string, confirmTodos: number) {
   return [
@@ -51,5 +51,28 @@ describe("listReports", () => {
 
   it("returns an empty array when the reports directory does not exist", async () => {
     expect(await listReports("weekly")).toEqual([]);
+  });
+});
+
+describe("listReportsFromSupabase", () => {
+  it("filters by reports/<kind>/ prefix and sorts by date descending", async () => {
+    const client = {
+      selectByPath: async () => null,
+      selectPathsByPrefix: async () => [],
+      selectByPrefix: async (prefix: string) => {
+        expect(prefix).toBe("reports/daily/");
+        return [
+          { path: "reports/daily/2026-07-22.md", content: dailyRaw("2026-07-22", 0) },
+          { path: "reports/daily/2026-07-24.md", content: dailyRaw("2026-07-24", 2) },
+        ];
+      },
+    };
+    const reports = await listReportsFromSupabase("daily", client);
+    expect(reports.map((r) => r.path)).toEqual([
+      "reports/daily/2026-07-24.md",
+      "reports/daily/2026-07-22.md",
+    ]);
+    expect(reports[0].date).toBe("2026-07-24");
+    expect(reports[0].frontmatter.confirm_todos).toBe(2);
   });
 });

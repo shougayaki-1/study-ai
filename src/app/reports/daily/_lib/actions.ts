@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { appendCorrection, type ConfirmTodo } from "@/lib/vault";
+import { appendCorrection, getVaultSource, type ConfirmTodo } from "@/lib/vault";
 import { buildCorrectionEntry } from "./build-correction";
 
 export async function performCorrection(input: {
@@ -10,6 +10,13 @@ export async function performCorrection(input: {
   choice: string;
   note?: string;
 }): Promise<void> {
+  // 書き込みは performCorrection に一本化されているので、ガードもここに置く
+  // （submitCorrection は revalidatePath を足すだけのラッパー）。
+  if (getVaultSource() === "supabase") {
+    throw new Error(
+      "performCorrection is disabled when STUDY_AI_VAULT_SOURCE=supabase: the cloud mirror is read-only"
+    );
+  }
   const entry = buildCorrectionEntry({ ...input, now: new Date() });
   await appendCorrection(entry);
 }
