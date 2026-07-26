@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { fileURLToPath } from 'node:url'; import { printJson } from './lib.mjs';
+import { loadVaultEnv } from './vault/env.mjs';
 export const DATE=/^\d{4}-\d{2}-\d{2}$/; export const TIME=/^\d{2}:\d{2}$/; export const SUBJECTS=['英語R','英語L','現代文','古文','漢文','数学IA','数学2BC','化学基礎','地学基礎','地理','政治経済','情報','小論文']; export const STATUSES=['planned','done','skipped'];
 export function validate(date,start,end,subject,status){if(!DATE.test(date))throw new Error('date は YYYY-MM-DD 形式である必要があります');if(start!==undefined&&!TIME.test(start)||end!==undefined&&!TIME.test(end))throw new Error('start/end は HH:MM 形式である必要があります');if(start!==undefined&&end!==undefined&&!(end>start))throw new Error('end は start より後である必要があります');if(subject!==undefined&&!SUBJECTS.includes(subject))throw new Error('invalid subject');if(status!==undefined&&!STATUSES.includes(status))throw new Error('invalid status')}
 export async function run([date,start,end,subject,memo]){if(!date||!start||!end||!subject||memo===undefined)throw new Error('usage');validate(date,start,end,subject);const v=await import('./vault/index.mjs');let body='';try{({body}=await v.readVaultFile(`plans/${date}.md`))}catch(e){if(e.code!=='ENOENT')throw e}const block={id:v.nextPlanId(v.parsePlanBlocks(body)),start,end,subject,status:'planned',memo};await v.appendPlanBlock(date,block);return block}
-if(process.argv[1]===fileURLToPath(import.meta.url))printJson(await run(process.argv.slice(2)));
+if (process.argv[1] === fileURLToPath(import.meta.url)) { loadVaultEnv(); printJson(await run(process.argv.slice(2))); }

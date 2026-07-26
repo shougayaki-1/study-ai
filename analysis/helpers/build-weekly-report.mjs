@@ -3,6 +3,7 @@
 // 使い方: node analysis/helpers/build-weekly-report.mjs <weekStr(YYYY-Www)> <reportDataJSONFile|->
 //   reportDataJSON: {"sections":[{"heading":"学習時間推移","body":"..."}, ...]}
 import { fileURLToPath } from 'node:url';
+import { loadVaultEnv } from './vault/env.mjs';
 import { readFileSync } from 'node:fs';
 import { printJson } from './lib.mjs';
 
@@ -41,5 +42,6 @@ export async function run([weekStr, dataPathOrDash]) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  loadVaultEnv();
   printJson(await run(process.argv.slice(2)));
 }

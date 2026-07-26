@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // One-off, manual Supabase-to-vault migration. Never add this to nightly jobs.
 import { fileURLToPath } from 'node:url';
+import { loadVaultEnv } from './vault/env.mjs';
 import { loadEnv, printJson, restClient } from './lib.mjs';
 import {
   appendPlanBlock,
@@ -194,6 +195,7 @@ export async function run(argv = [], { createClient = createSupabaseMigrationCli
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  loadVaultEnv();
   const result = await run(process.argv.slice(2));
   printJson(result);
   if (result.warnings.length) {

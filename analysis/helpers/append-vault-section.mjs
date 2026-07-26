@@ -3,6 +3,7 @@
 // 追記するための共通ユーティリティ(全置換にしない=差分更新)。夜間バッチ固有。
 // 使い方: node analysis/helpers/append-vault-section.mjs <relPath> <heading> <contentFile|-> [frontmatterPatchJSON]
 import { fileURLToPath } from 'node:url';
+import { loadVaultEnv } from './vault/env.mjs';
 import { readFileSync } from 'node:fs';
 import { printJson } from './lib.mjs';
 
@@ -37,5 +38,6 @@ export async function run([relPath, heading, contentPathOrDash, frontmatterPatch
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  loadVaultEnv();
   printJson(await run(process.argv.slice(2)));
 }

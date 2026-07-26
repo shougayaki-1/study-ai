@@ -3,6 +3,7 @@
 // Drive同期の一時ファイルは除外する)。契約4bに無い、夜間バッチ固有の一覧ヘルパー。
 // 使い方: node analysis/helpers/list-inbox-items.mjs
 import { fileURLToPath } from 'node:url';
+import { loadVaultEnv } from './vault/env.mjs';
 import path from 'node:path';
 import { printJson } from './lib.mjs';
 
@@ -46,5 +47,6 @@ export async function run() {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  loadVaultEnv();
   printJson(await run());
 }

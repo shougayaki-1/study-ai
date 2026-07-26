@@ -5,6 +5,7 @@
 //   reportDataJSON: {"confirmTodos":[{"id":"todo-1","q":"...","options":["日本史","世界史"],"default":"日本史","ref":"_archive/..."}],
 //                     "sections":[{"heading":"今日の学習時間","body":"..."}, ...]}
 import { fileURLToPath } from 'node:url';
+import { loadVaultEnv } from './vault/env.mjs';
 import { readFileSync } from 'node:fs';
 import { printJson } from './lib.mjs';
 
@@ -63,5 +64,6 @@ export async function run([dateStr, dataPathOrDash]) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  loadVaultEnv();
   printJson(await run(process.argv.slice(2)));
 }

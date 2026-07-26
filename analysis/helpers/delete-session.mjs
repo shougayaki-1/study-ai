@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { fileURLToPath } from 'node:url';
+import { loadVaultEnv } from './vault/env.mjs';
 import { printJson } from './lib.mjs';
 import { assertValidStudySessionFields } from './study-session-validation.mjs';
 
@@ -14,5 +15,6 @@ export async function run([date, id]) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  loadVaultEnv();
   printJson(await run(process.argv.slice(2)));
 }

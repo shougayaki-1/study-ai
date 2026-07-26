@@ -2,6 +2,7 @@
 // _inbox/corrections.md を読み、CorrectionEntry[]をJSONで返す。契約4b `readCorrections` のCLIラッパー。
 // 使い方: node analysis/helpers/read-corrections.mjs
 import { fileURLToPath } from 'node:url';
+import { loadVaultEnv } from './vault/env.mjs';
 import { printJson } from './lib.mjs';
 
 export async function run() {
@@ -10,5 +11,6 @@ export async function run() {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  loadVaultEnv();
   printJson(await run());
 }

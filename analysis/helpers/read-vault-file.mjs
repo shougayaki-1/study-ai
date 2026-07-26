@@ -3,6 +3,7 @@
 // 契約4b `readVaultFile` のCLIラッパー(ヘッドレスCLIのシェル実行から呼べるようにする)。
 // 使い方: node analysis/helpers/read-vault-file.mjs <relPath>
 import { fileURLToPath } from 'node:url';
+import { loadVaultEnv } from './vault/env.mjs';
 import { printJson } from './lib.mjs';
 
 export async function run([relPath]) {
@@ -14,5 +15,6 @@ export async function run([relPath]) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  loadVaultEnv();
   printJson(await run(process.argv.slice(2)));
 }

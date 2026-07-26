@@ -2,6 +2,7 @@
 // vault/ 配下にMarkdownを書き込む(frontmatter+本文)。契約4b `writeVaultFile` のCLIラッパー。
 // 使い方: node analysis/helpers/write-vault-file.mjs <relPath> <frontmatterJSON> <bodyFilePath|->
 import { fileURLToPath } from 'node:url';
+import { loadVaultEnv } from './vault/env.mjs';
 import { readFileSync } from 'node:fs';
 import { printJson } from './lib.mjs';
 
@@ -17,5 +18,6 @@ export async function run([relPath, frontmatterArg, bodyPathOrDash]) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  loadVaultEnv();
   printJson(await run(process.argv.slice(2)));
 }
