@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -81,5 +82,14 @@ describe("readPlan", () => {
       { id: "p-1", start: "09:00", end: "10:30", subject: "英語R", status: "planned", memo: "長文演習" },
       { id: "p-2", start: "11:00", end: "12:00", subject: "数学IA", status: "done", memo: "" },
     ]);
+  });
+});
+
+describe("TS/Node parity", () => {
+  it("parsePlanBlocks produces the same structure in TS and Node", async () => {
+    const nodeModule = (await import(pathToFileURL(path.join(process.cwd(), "analysis/helpers/vault/plan.mjs")).href)) as {
+      parsePlanBlocks: typeof parsePlanBlocks;
+    };
+    expect(JSON.stringify(nodeModule.parsePlanBlocks(PLAN_FIXTURE_BODY))).toBe(JSON.stringify(parsePlanBlocks(PLAN_FIXTURE_BODY)));
   });
 });
