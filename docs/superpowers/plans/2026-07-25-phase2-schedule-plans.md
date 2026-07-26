@@ -204,11 +204,15 @@ EOF
 ## Task 2: TS側 予定の読み取り・完了トグル (`schedule.ts` 拡張)
 
 **Files:**
+- Create: `src/lib/vault/write.ts`（TS側のアトミック書き込みヘルパ。契約 §0「書き込みはアトミックに行う」に対応。Phase 1のTS側には書き込みヘルパが無いため、この計画で新設する）
 - Modify: `src/lib/vault/schedule.ts`
 - Modify: `src/lib/vault/schedule.test.ts`
 
 **Interfaces:**
 - Consumes: `readVaultFile`（`./read`）, `getVaultRoot`（`./root`）
+- Produces: `src/lib/vault/write.ts` から
+  `export async function writeVaultFileAtomic(fullPath: string, content: string): Promise<void>`
+  （同一ディレクトリに一時ファイルを書いて `rename`。Node側 `writeVaultFile` と同じ方式）。
 - Produces:
   ```ts
   export async function readSchedule(): Promise<ScheduleEvent[]>;               // 無ければ []
@@ -286,7 +290,25 @@ npx vitest run src/lib/vault/schedule.test.ts
 3. 最小実装。`src/lib/vault/schedule.ts` の先頭にimportを追加し、末尾に2関数を追加:
 
 ```ts
-import { readFile, writeFile } from "node:fs/promises";
+// src/lib/vault/write.ts (新規)
+// 契約 §0「書き込みはアトミックに行う」。同一ディレクトリに一時ファイルを書いてから rename する。
+// Node側 analysis/helpers/vault/read-write.mjs の writeVaultFile と同じ方式。
+// (別ファイルシステムを跨がないよう、一時ファイルは必ず書き込み先と同じディレクトリに作る)
+import { rename, writeFile } from "node:fs/promises";
+import path from "node:path";
+
+export async function writeVaultFileAtomic(fullPath: string, content: string): Promise<void> {
+  const dir = path.dirname(fullPath);
+  const tmpPath = path.join(dir, `.${path.basename(fullPath)}.tmp-${process.pid}`);
+  await writeFile(tmpPath, content, "utf8");
+  await rename(tmpPath, fullPath);
+}
+```
+
+```ts
+// src/lib/vault/schedule.ts に追記
+import { readFile } from "node:fs/promises";
+import { writeVaultFileAtomic } from "./write";
 import path from "node:path";
 import { readVaultFile } from "./read";
 import { getVaultRoot } from "./root";
@@ -309,6 +331,10 @@ export async function readSchedule(): Promise<ScheduleEvent[]> {
 }
 
 export async function setScheduleEventDone(id: string, done: boolean): Promise<void> {
+  // 契約 §0「書き込みはアトミックに行う」。Node側は writeVaultFile が一時ファイル+rename に
+  // なっているが、TS側には書き込みヘルパが無い(Phase 1のTS側は読み取り中心 + appendCorrection の
+  // 追記のみ)。ここは本文の全書き換えなので、writeFile 直呼びだと途中で落ちた際に
+  // schedule.md が切り詰められた状態で残る。専用ヘルパ writeVaultFileAtomic を使う。
   const fullPath = path.join(getVaultRoot(), SCHEDULE_REL_PATH);
   const raw = await readFile(fullPath, "utf8");
   const marker = `id=${id} |`;
@@ -320,7 +346,7 @@ export async function setScheduleEventDone(id: string, done: boolean): Promise<v
     if (rest === null || !rest.startsWith(marker)) return line;
     return `${nextPrefix}${rest}`;
   });
-  await writeFile(fullPath, lines.join("\n"), "utf8");
+  await writeVaultFileAtomic(fullPath, lines.join("\n"));
 }
 ```
 
@@ -913,12 +939,38 @@ function locateLineIndex(lines, id) {
   });
 }
 
+const ANY_HEADING_RE = /^#{1,6}\s/;
+
+/**
+ * `## 予定` セクションの「最後の行の次」の挿入位置を返す。セクションが無ければ -1。
+ * 本文末尾ではなく**セクション内**に挿入するのが要点(後続に手書きセクションがあると
+ * 末尾追記ではそちらに紛れ込むため)。`## ` だけでなく任意のレベルの見出しで止める。
+ */
+function locateSectionInsertIndex(lines) {
+  const headingIndex = lines.findIndex((line) => line.trim() === HEADING);
+  if (headingIndex === -1) return -1;
+  let insertAt = headingIndex + 1;
+  for (let i = headingIndex + 1; i < lines.length; i += 1) {
+    if (ANY_HEADING_RE.test(lines[i])) break;
+    if (lines[i].trim() !== '') insertAt = i + 1;
+  }
+  return insertAt;
+}
+
 export async function appendScheduleEvent(event) {
   const { frontmatter, body } = await readScheduleFile();
-  const trimmed = body.endsWith('\n') ? body.slice(0, -1) : body;
-  const withHeading = trimmed.includes(HEADING) ? trimmed : `${trimmed ? `${trimmed}\n` : ''}${HEADING}`;
-  const nextBody = `${withHeading}\n${formatScheduleEventLine(event)}\n`;
-  await writeVaultFile('schedule.md', { ...frontmatter, updated: new Date().toISOString() }, nextBody);
+  const line = formatScheduleEventLine(event);
+  const lines = body.split('\n');
+  const insertAt = locateSectionInsertIndex(lines);
+
+  let nextLines;
+  if (insertAt === -1) {
+    const trimmed = body.endsWith('\n') ? body.slice(0, -1) : body;
+    nextLines = `${trimmed ? `${trimmed}\n` : ''}${HEADING}\n${line}\n`.split('\n');
+  } else {
+    nextLines = [...lines.slice(0, insertAt), line, ...lines.slice(insertAt)];
+  }
+  await writeVaultFile('schedule.md', { ...frontmatter, updated: new Date().toISOString() }, nextLines.join('\n'));
 }
 
 export async function updateScheduleEvent(id, patch) {
@@ -1250,12 +1302,38 @@ function locateLineIndex(lines, id) {
   return lines.findIndex((line) => line.startsWith(marker));
 }
 
+const ANY_HEADING_RE = /^#{1,6}\s/;
+
+/**
+ * `## 計画` セクションの「最後の行の次」の挿入位置を返す。セクションが無ければ -1。
+ * 本文末尾ではなく**セクション内**に挿入するのが要点(後続に手書きセクションがあると
+ * 末尾追記ではそちらに紛れ込むため)。`## ` だけでなく任意のレベルの見出しで止める。
+ */
+function locateSectionInsertIndex(lines) {
+  const headingIndex = lines.findIndex((line) => line.trim() === HEADING);
+  if (headingIndex === -1) return -1;
+  let insertAt = headingIndex + 1;
+  for (let i = headingIndex + 1; i < lines.length; i += 1) {
+    if (ANY_HEADING_RE.test(lines[i])) break;
+    if (lines[i].trim() !== '') insertAt = i + 1;
+  }
+  return insertAt;
+}
+
 export async function appendPlanBlock(date, block) {
   const { frontmatter, body } = await readPlanFile(date);
-  const trimmed = body.endsWith('\n') ? body.slice(0, -1) : body;
-  const withHeading = trimmed.includes(HEADING) ? trimmed : `${trimmed ? `${trimmed}\n` : ''}${HEADING}`;
-  const nextBody = `${withHeading}\n${formatPlanBlockLine(block)}\n`;
-  await writeVaultFile(planRelPath(date), { ...frontmatter, updated: new Date().toISOString() }, nextBody);
+  const line = formatPlanBlockLine(block);
+  const lines = body.split('\n');
+  const insertAt = locateSectionInsertIndex(lines);
+
+  let nextLines;
+  if (insertAt === -1) {
+    const trimmed = body.endsWith('\n') ? body.slice(0, -1) : body;
+    nextLines = `${trimmed ? `${trimmed}\n` : ''}${HEADING}\n${line}\n`.split('\n');
+  } else {
+    nextLines = [...lines.slice(0, insertAt), line, ...lines.slice(insertAt)];
+  }
+  await writeVaultFile(planRelPath(date), { ...frontmatter, updated: new Date().toISOString() }, nextLines.join('\n'));
 }
 
 export async function updatePlanBlock(date, id, patch) {
@@ -1713,10 +1791,16 @@ import { printJson } from './lib.mjs';
 
 const SUBJECTS = ['英語R', '英語L', '現代文', '古文', '漢文', '数学IA', '数学2BC', '化学基礎', '地学基礎', '地理', '政治経済', '情報', '小論文'];
 const TIME_RE = /^\d{2}:\d{2}$/;
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 export async function run([date, start, end, subject, memo]) {
   if (!date || !start || !end || !subject || memo === undefined) {
     throw new Error('使い方: node helpers/add-plan-block.mjs <date> <start> <end> <subject> <memo>');
+  }
+  // date は書き込み先ファイル名(plans/<date>.md)になるため、形式を検査しないと
+  // `plans/きょう.md` のような想定外のファイルが作られる。
+  if (!DATE_RE.test(date)) {
+    throw new Error('date は YYYY-MM-DD 形式である必要があります');
   }
   if (!TIME_RE.test(start) || !TIME_RE.test(end)) {
     throw new Error('start/end は HH:MM 形式である必要があります');
@@ -1755,11 +1839,16 @@ import { printJson } from './lib.mjs';
 
 const SUBJECTS = ['英語R', '英語L', '現代文', '古文', '漢文', '数学IA', '数学2BC', '化学基礎', '地学基礎', '地理', '政治経済', '情報', '小論文'];
 const TIME_RE = /^\d{2}:\d{2}$/;
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const PLAN_STATUSES = ['planned', 'done', 'skipped'];
 
 export async function run([date, id, patchArg]) {
   if (!date || !id || !patchArg) {
     throw new Error('使い方: node helpers/edit-plan-block.mjs <date> <id> <patchJSON>');
+  }
+  // date は読み書き先ファイル名(plans/<date>.md)になるため形式を検査する。
+  if (!DATE_RE.test(date)) {
+    throw new Error('date は YYYY-MM-DD 形式である必要があります');
   }
   const patch = JSON.parse(patchArg);
   if (patch.start !== undefined && !TIME_RE.test(patch.start)) {
@@ -1802,9 +1891,15 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 import { fileURLToPath } from 'node:url';
 import { printJson } from './lib.mjs';
 
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
 export async function run([date, id]) {
   if (!date || !id) {
     throw new Error('使い方: node helpers/delete-plan-block.mjs <date> <id>');
+  }
+  // date は読み書き先ファイル名(plans/<date>.md)になるため形式を検査する。
+  if (!DATE_RE.test(date)) {
+    throw new Error('date は YYYY-MM-DD 形式である必要があります');
   }
   const { deletePlanBlock } = await import('./vault/index.mjs');
   await deletePlanBlock(date, id);
@@ -2141,7 +2236,7 @@ EOF
    5) その他
    ```
    回答を `assignment` / `application` / `mock_exam` / `exam` / `other` に対応させる。
-2. タイトルを尋ねる(自由入力)。` | ` や `=` を含む場合は全角に置換するか、含まない形で言い直してもらう。
+2. タイトルを尋ねる(自由入力)。` | ` や改行を含む場合は全角に置換するか、含まない形で言い直してもらう(`=` は値に含めてよい)。
 3. 締切日(`YYYY-MM-DD`)を尋ねる。
 4. `node analysis/helpers/add-event.mjs "<kind>" "<title>" "<due>"` を実行し、
    `vault/schedule.md` に追記する。`STUDY_AI_VAULT_DIR` が未設定の場合はエラーが

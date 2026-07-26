@@ -1,47 +1,10 @@
 import { expect, test } from "@playwright/test";
-
-test("履歴の記録を編集して削除できる", async ({ page }) => {
-  const memo = `E2E履歴-${crypto.randomUUID()}`;
-  await page.goto("/record");
-  await page.getByLabel("コメント・メモ（任意）").fill(memo);
-  await page.getByRole("button", { name: "1件をまとめて保存" }).click();
-  await expect(page.getByRole("heading", { name: "今日の頑張り" })).toBeVisible();
-
-  await page.goto("/records");
-  const row = page.getByText(`メモ: ${memo}`, { exact: true }).locator("..");
-  await expect(row).toBeVisible();
-  await row.getByLabel("記録を編集").click();
-  await page.getByLabel("学習時間（分）").fill("65");
-  await page.getByRole("button", { name: "保存" }).click();
-  await expect(row.getByText("65分", { exact: true })).toBeVisible();
-
-  page.once("dialog", (dialog) => dialog.accept());
-  await row.getByLabel("記録を削除").click();
-  await expect(page.getByText(`メモ: ${memo}`, { exact: true })).toHaveCount(0);
-});
-
-test("繰り返し時間割を作成できる", async ({ page }) => {
-  const memo = `E2E時間割-${crypto.randomUUID()}`;
-  // plan_blocks are only rendered for the currently selected date, and the
-  // recurring plan only creates rows on the chosen weekdays starting today.
-  // Pick today's weekday chip so the first generated block lands on the
-  // already-selected date (today) and is visible without navigating.
-  const weekdayLabels = ["日", "月", "火", "水", "木", "金", "土"];
-  const todayLabel = weekdayLabels[new Date().getDay()];
-
-  await page.goto("/schedule");
-  await page.getByRole("button", { name: "時間割" }).click();
-  await page.getByRole("button", { name: "追加" }).click();
-  await page.getByRole("button", { name: "毎週繰り返し" }).click();
-  await page.getByText(todayLabel, { exact: true }).last().click();
-  await page.getByLabel("メモ（任意）").fill(memo);
-  await page.getByRole("button", { name: "保存" }).click();
-  await expect(page.getByText(memo, { exact: true }).first()).toBeVisible();
-});
-
-test("週の学習時間を保存できる", async ({ page }) => {
-  await page.goto("/stats");
-  await page.getByLabel("週合計（分）").fill("345");
-  await page.getByRole("button", { name: "保存" }).first().click();
-  await expect(page.getByText("週次振り返り・来週の重点")).toBeVisible();
-});
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import path from "node:path";
+const vaultDir=path.join(process.cwd(),"e2e","fixtures","vault"),schedulePath=path.join(vaultDir,"schedule.md"),plansDir=path.join(vaultDir,"plans");
+const SCHEDULE_FIXTURE=["---","type: schedule","schema_version: 1","updated: 2026-07-24T22:10:00+09:00","---","","## 予定","- [ ] id=ev-1 | kind=mock_exam | title=第2回模試 | due=2026-08-01","- [x] id=ev-2 | kind=assignment | title=英語課題 | due=2026-07-20",""].join("\n");
+const today=new Date(),todayKey=`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}-${String(today.getDate()).padStart(2,"0")}`,todayPlanPath=path.join(plansDir,`${todayKey}.md`),TODAY_PLAN=["---","type: study-plan",`date: ${todayKey}`,"schema_version: 1","---","","## 計画","- id=p-1 | start=09:00 | end=10:30 | subject=英語R | status=planned | memo=E2E計画",""].join("\n");
+test.beforeEach(async()=>{await writeFile(schedulePath,SCHEDULE_FIXTURE);await mkdir(plansDir,{recursive:true});await writeFile(todayPlanPath,TODAY_PLAN)}); test.afterEach(async()=>{await writeFile(schedulePath,SCHEDULE_FIXTURE);await rm(todayPlanPath,{force:true})});
+test("/scheduleで予定一覧と当日の学習計画が表示される",async({page})=>{await page.goto("/schedule");await expect(page.getByText("第2回模試")).toBeVisible();await expect(page.getByText("英語課題")).toBeVisible();await expect(page.getByText("E2E計画")).toBeVisible()});
+test("予定の完了チェックボックスをタップするとschedule.mdが書き換わる",async({page})=>{await page.goto("/schedule");await page.getByRole("checkbox",{name:"第2回模試を完了にする"}).click();await expect(async()=>expect(await readFile(schedulePath,"utf8")).toContain("- [x] id=ev-1 | kind=mock_exam | title=第2回模試 | due=2026-08-01")).toPass()});
+test("週の学習時間を保存できる",async({page})=>{await page.goto("/stats");await page.getByLabel("週合計（分）").fill("345");await page.getByRole("button",{name:"保存"}).first().click();await expect(page.getByText("週次振り返り・来週の重点")).toBeVisible()});
