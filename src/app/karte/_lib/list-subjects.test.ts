@@ -35,13 +35,14 @@ describe("listKarteSubjectsFromSupabase", () => {
   it("extracts unique subject directory names from subjects/ prefixed paths", async () => {
     const client = {
       selectByPath: async () => null,
-      selectByPrefix: async (prefix: string) => {
+      selectByPrefix: async () => [],
+      selectPathsByPrefix: async (prefix: string) => {
         expect(prefix).toBe("subjects/");
         return [
-          { path: "subjects/日本史/弱点カルテ.md", content: "" },
-          { path: "subjects/日本史/誤答ログ.md", content: "" },
-          { path: "subjects/世界史/弱点カルテ.md", content: "" },
-          { path: "subjects/not-a-subject.md", content: "" },
+          "subjects/日本史/弱点カルテ.md",
+          "subjects/日本史/誤答ログ.md",
+          "subjects/世界史/弱点カルテ.md",
+          "subjects/not-a-subject.md",
         ];
       },
     };

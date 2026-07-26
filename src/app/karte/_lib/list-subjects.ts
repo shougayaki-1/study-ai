@@ -3,10 +3,10 @@ import path from "node:path";
 import { getVaultFilesClient, getVaultRoot, getVaultSource, type VaultFilesClient } from "@/lib/vault";
 
 export async function listKarteSubjectsFromSupabase(client: VaultFilesClient): Promise<string[]> {
-  const rows = await client.selectByPrefix("subjects/");
+  const paths = await client.selectPathsByPrefix("subjects/");
   const names = new Set<string>();
-  for (const row of rows) {
-    const rest = row.path.slice("subjects/".length);
+  for (const filePath of paths) {
+    const rest = filePath.slice("subjects/".length);
     const slash = rest.indexOf("/");
     if (slash === -1) continue;
     names.add(rest.slice(0, slash));

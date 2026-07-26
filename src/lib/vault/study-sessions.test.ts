@@ -90,13 +90,10 @@ describe("listStudyRecordDatesFromSupabase", () => {
   it("filters to records/YYYY-MM-DD.md and sorts dates descending", async () => {
     const client = {
       selectByPath: async () => null,
-      selectByPrefix: async (prefix: string) => {
+      selectByPrefix: async () => [],
+      selectPathsByPrefix: async (prefix: string) => {
         expect(prefix).toBe("records/");
-        return [
-          { path: "records/2026-07-20.md", content: "" },
-          { path: "records/2026-07-25.md", content: "" },
-          { path: "records/not-a-date.md", content: "" },
-        ];
+        return ["records/2026-07-20.md", "records/2026-07-25.md", "records/not-a-date.md"];
       },
     };
     expect(await listStudyRecordDatesFromSupabase(client)).toEqual(["2026-07-25", "2026-07-20"]);

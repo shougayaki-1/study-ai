@@ -25,6 +25,7 @@ function fakeClient(rows: Record<string, string>): VaultFilesClient {
       Object.entries(rows)
         .filter(([p]) => p.startsWith(prefix))
         .map(([p, content]) => ({ path: p, content })),
+    selectPathsByPrefix: async (prefix) => Object.keys(rows).filter((p) => p.startsWith(prefix)),
   };
 }
 

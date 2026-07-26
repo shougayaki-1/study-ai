@@ -74,6 +74,7 @@ describe("readVaultFileFromSupabase", () => {
     return {
       selectByPath: async (p: string) => (p in rows ? { path: p, content: rows[p] } : null),
       selectByPrefix: async () => [],
+      selectPathsByPrefix: async () => [],
     };
   }
 

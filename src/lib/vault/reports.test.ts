@@ -58,6 +58,7 @@ describe("listReportsFromSupabase", () => {
   it("filters by reports/<kind>/ prefix and sorts by date descending", async () => {
     const client = {
       selectByPath: async () => null,
+      selectPathsByPrefix: async () => [],
       selectByPrefix: async (prefix: string) => {
         expect(prefix).toBe("reports/daily/");
         return [

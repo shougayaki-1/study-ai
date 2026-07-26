@@ -85,9 +85,9 @@ export async function readStudyRecord(date: string): Promise<StudyRecordDay> {
 }
 
 export async function listStudyRecordDatesFromSupabase(client: VaultFilesClient): Promise<string[]> {
-  const rows = await client.selectByPrefix("records/");
-  return rows
-    .map((row) => row.path.slice("records/".length))
+  const paths = await client.selectPathsByPrefix("records/");
+  return paths
+    .map((filePath) => filePath.slice("records/".length))
     .filter((name) => RECORD_FILENAME_RE.test(name))
     .map((name) => name.slice(0, -3))
     .sort((a, b) => (a < b ? 1 : a > b ? -1 : 0));
