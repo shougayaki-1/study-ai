@@ -51,6 +51,29 @@ test('readVaultFile throws when relPath escapes the vault root', async () => {
   }
 });
 
+test('readVaultFile warns but still reads an unknown schema_version', async () => {
+  const vaultDir = await mkdtemp(path.join(tmpdir(), 'vault-rw-schema-'));
+  const originalEnv = process.env.STUDY_AI_VAULT_DIR;
+  const originalWarn = console.warn;
+  const warnings = [];
+  process.env.STUDY_AI_VAULT_DIR = vaultDir;
+  console.warn = (message) => warnings.push(message);
+  try {
+    await writeVaultFile('future.md', { type: 'schedule', schema_version: 2 }, '## 予定\n');
+    const result = await readVaultFile('future.md');
+    assert.equal(result.frontmatter.schema_version, 2);
+    assert.equal(result.body, '## 予定\n');
+    assert.deepEqual(warnings, [
+      'Unknown vault schema_version 2 in future.md; attempting a best-effort read',
+    ]);
+  } finally {
+    console.warn = originalWarn;
+    await rm(vaultDir, { recursive: true, force: true });
+    if (originalEnv === undefined) delete process.env.STUDY_AI_VAULT_DIR;
+    else process.env.STUDY_AI_VAULT_DIR = originalEnv;
+  }
+});
+
 test('writeVaultFile writes atomically: concurrent writes never produce a torn/mixed file', async () => {
   const vaultDir = await mkdtemp(path.join(tmpdir(), 'vault-rw-atomic-'));
   const original = process.env.STUDY_AI_VAULT_DIR;
