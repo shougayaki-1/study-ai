@@ -2,7 +2,6 @@ import { expect, test } from "@playwright/test";
 
 test("主要画面を認証済みで表示できる", async ({ page }) => {
   for (const [path, heading] of [
-    ["/record", "一日のまとめ記録"],
     ["/records", "履歴"],
     ["/stats", "分析"],
     ["/schedule", "予定"],
@@ -13,14 +12,11 @@ test("主要画面を認証済みで表示できる", async ({ page }) => {
   }
 });
 
-test("学習記録を保存して履歴に表示できる", async ({ page }) => {
-  await page.goto("/record");
-  await expect(page.getByLabel("科目")).toBeVisible();
-  await page.getByRole("button", { name: "1件をまとめて保存" }).click();
-  await expect(page.getByRole("heading", { name: "今日の頑張り" })).toBeVisible();
-
+test("vaultフィクスチャの学習記録が履歴に表示される", async ({ page }) => {
   await page.goto("/records");
-  await expect(page.getByText("60分").first()).toBeVisible();
+  await expect(page.getByText("2026-07-24")).toBeVisible();
+  await expect(page.getByText("英語R 60分")).toBeVisible();
+  await expect(page.getByText("メモ: 長文2題")).toBeVisible();
 });
 
 test("締切予定を作成して編集できる", async ({ page }) => {
