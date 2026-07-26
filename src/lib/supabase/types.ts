@@ -1075,6 +1075,24 @@ export type Database = {
           },
         ]
       }
+      vault_files: {
+        Row: {
+          content: string
+          path: string
+          updated_at: string
+        }
+        Insert: {
+          content: string
+          path: string
+          updated_at?: string
+        }
+        Update: {
+          content?: string
+          path?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       weakness_scores: {
         Row: {
           accuracy: number | null
