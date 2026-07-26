@@ -1,0 +1,4 @@
+#!/usr/bin/env node
+import { fileURLToPath } from 'node:url'; import { printJson } from './lib.mjs'; import { validate } from './add-plan-block.mjs';
+export async function run([date,id,patchArg]){if(!date||!id||!patchArg)throw new Error('usage');const patch=JSON.parse(patchArg);validate(date,patch.start,patch.end,patch.subject,patch.status);const v=await import('./vault/index.mjs');if(patch.start!==undefined||patch.end!==undefined){const {body}=await v.readVaultFile(`plans/${date}.md`);const cur=v.parsePlanBlocks(body).find(x=>x.id===id);if(!cur)throw new Error('plan block not found');validate(date,patch.start??cur.start,patch.end??cur.end)}await v.updatePlanBlock(date,id,patch);return {date,id,patch}}
+if(process.argv[1]===fileURLToPath(import.meta.url))printJson(await run(process.argv.slice(2)));
