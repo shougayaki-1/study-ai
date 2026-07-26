@@ -5,7 +5,7 @@
 import { fileURLToPath } from 'node:url';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { printJson, restClient } from './lib.mjs';
+import { loadEnv, printJson, restClient } from './lib.mjs';
 import { vaultRoot } from './vault/root.mjs';
 
 const PAGE_SIZE = 500;
@@ -74,6 +74,11 @@ function parseArgv(argv) {
 
 export async function run(argv = [], { createClient = createVaultSyncClient, root } = {}) {
   const options = parseArgv(argv);
+  // analysis/.env を process.env にマージしてから vaultRoot() を呼ぶ。順序が逆だと、
+  // run-nightly.sh 経由(STUDY_AI_VAULT_DIR を export 済み)では動くのに、
+  // シェルから直接実行したときだけ「STUDY_AI_VAULT_DIR is not set」で落ちる。
+  // root を注入するテストは Supabase 認証情報も不要なので loadEnv しない。
+  if (root === undefined) loadEnv();
   const vaultDir = root ?? vaultRoot();
   const client = createClient();
   const localEntries = await collectMarkdownFiles(vaultDir);
