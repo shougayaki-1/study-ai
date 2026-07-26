@@ -3,6 +3,8 @@ import { readdir } from "node:fs/promises";
 import path from "node:path";
 import { readVaultFile } from "./read";
 import { getVaultRoot } from "./root";
+import { getVaultSource } from "./source";
+import { getVaultFilesClient, type VaultFilesClient } from "./supabase-client";
 
 export type StudyKind = "material" | "common_test" | "secondary";
 export type Understanding = "understood" | "uncertain" | "not_understood";
@@ -82,7 +84,19 @@ export async function readStudyRecord(date: string): Promise<StudyRecordDay> {
   }
 }
 
+export async function listStudyRecordDatesFromSupabase(client: VaultFilesClient): Promise<string[]> {
+  const rows = await client.selectByPrefix("records/");
+  return rows
+    .map((row) => row.path.slice("records/".length))
+    .filter((name) => RECORD_FILENAME_RE.test(name))
+    .map((name) => name.slice(0, -3))
+    .sort((a, b) => (a < b ? 1 : a > b ? -1 : 0));
+}
+
 export async function listStudyRecordDates(): Promise<string[]> {
+  if (getVaultSource() === "supabase") {
+    return listStudyRecordDatesFromSupabase(await getVaultFilesClient());
+  }
   const dir = path.join(getVaultRoot(), "records");
   let entries: string[];
   try {

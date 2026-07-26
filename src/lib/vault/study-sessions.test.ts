@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { listStudyRecordDates, parseStudySessions, formatStudySessionLine, readStudyRecord, type StudySession } from "./study-sessions";
+import { listStudyRecordDates, listStudyRecordDatesFromSupabase, parseStudySessions, formatStudySessionLine, readStudyRecord, type StudySession } from "./study-sessions";
 
 const REPO_ROOT = path.join(fileURLToPath(new URL(".", import.meta.url)), "../../..");
 const BODY = readFileSync(path.join(REPO_ROOT, "analysis/test/fixtures/study-record.md"), "utf8");
@@ -83,5 +83,22 @@ describe("TS/Node parity", () => {
     const nodeModulePath = path.join(REPO_ROOT, "analysis/helpers/vault/study-sessions.mjs");
     const nodeModule = await import(pathToFileURL(nodeModulePath).href);
     expect(JSON.stringify(nodeModule.parseStudySessions(BODY))).toBe(JSON.stringify(parseStudySessions(BODY)));
+  });
+});
+
+describe("listStudyRecordDatesFromSupabase", () => {
+  it("filters to records/YYYY-MM-DD.md and sorts dates descending", async () => {
+    const client = {
+      selectByPath: async () => null,
+      selectByPrefix: async (prefix: string) => {
+        expect(prefix).toBe("records/");
+        return [
+          { path: "records/2026-07-20.md", content: "" },
+          { path: "records/2026-07-25.md", content: "" },
+          { path: "records/not-a-date.md", content: "" },
+        ];
+      },
+    };
+    expect(await listStudyRecordDatesFromSupabase(client)).toEqual(["2026-07-25", "2026-07-20"]);
   });
 });
