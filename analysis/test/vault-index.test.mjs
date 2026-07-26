@@ -11,6 +11,7 @@ test('vault barrel re-exports every Foundation helper by its contract name', () 
   assert.equal(typeof vault.archivePhoto, 'function');
   assert.equal(typeof vault.readCorrections, 'function');
   assert.equal(typeof vault.clearCorrections, 'function');
+  for (const name of ['parseScheduleEvents', 'formatScheduleEventLine', 'nextEventId', 'appendScheduleEvent', 'updateScheduleEvent', 'deleteScheduleEvent', 'parsePlanBlocks', 'formatPlanBlockLine', 'nextPlanId', 'appendPlanBlock', 'updatePlanBlock', 'deletePlanBlock']) assert.equal(typeof vault[name], 'function');
   assert.equal(typeof vault.parseStudySessions, 'function');
   assert.equal(typeof vault.formatStudySessionLine, 'function');
   assert.equal(typeof vault.nextSessionId, 'function');
