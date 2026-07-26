@@ -408,7 +408,7 @@ npx vitest run src/lib/vault/study-sessions.test.ts
 6. コミットする。
 
 ```bash
-git add analysis/test/fixtures/study-record.md src/lib/vault/study-sessions.ts src/lib/vault/study-sessions.test.ts
+git add analysis/test/fixtures/study-record.md src/lib/vault/line-format.ts src/lib/vault/study-sessions.ts src/lib/vault/study-sessions.test.ts
 git commit -m "$(cat <<'EOF'
 feat(vault): add TS parser/formatter for study record session lines
 
@@ -856,7 +856,7 @@ node --test analysis/test/vault-study-sessions.test.mjs
 5. コミットする。
 
 ```bash
-git add analysis/helpers/vault/study-sessions.mjs analysis/test/vault-study-sessions.test.mjs
+git add analysis/helpers/vault/line-format.mjs analysis/helpers/vault/study-sessions.mjs analysis/test/vault-study-sessions.test.mjs
 git commit -m "$(cat <<'EOF'
 feat(analysis): add Node parser/formatter/id-allocator for study sessions
 
@@ -1047,6 +1047,14 @@ test('appendStudySession preserves lines it cannot parse and human-added notes',
   assert.match(raw, /### 手書きメモ/);
   assert.match(raw, /今日は集中できた。/);
   assert.match(raw, /id=s-2/);
+
+  // 追記は「本文末尾」ではなく `## セッション` セクション内に入ること。
+  // 末尾追記だと後続の `### 手書きメモ` の中に紛れ込むため、順序で検証する。
+  const rawLines = raw.split('\n');
+  const newIndex = rawLines.findIndex((line) => line.includes('id=s-2'));
+  const memoIndex = rawLines.findIndex((line) => line.includes('### 手書きメモ'));
+  assert.ok(newIndex !== -1 && memoIndex !== -1, '新しい行と手書きメモの見出しが両方存在すること');
+  assert.ok(newIndex < memoIndex, '新しいセッション行が `### 手書きメモ` より前(=セッションセクション内)にあること');
 }));
 
 test('updateStudySession preserves lines it cannot parse when rewriting a target line', withVault(async (dir) => {
@@ -1115,12 +1123,42 @@ function locateSessionLineIndex(lines, id) {
   return lines.findIndex((line) => line.startsWith(PREFIX) && line.slice(PREFIX.length).startsWith(marker));
 }
 
+/**
+ * `## セッション` セクションの「最後の行の次」の挿入位置を返す。
+ * セクションが無ければ本文末尾に見出しごと足す位置を返す。
+ * 本文末尾に足すのではなく**セクション内**に挿入するのが要点
+ * (後続に `## メモ` 等の手書きセクションがあると、末尾追記ではそちらに紛れ込むため)。
+ */
+const ANY_HEADING_RE = /^#{1,6}\s/;
+
+function locateSectionInsertIndex(lines) {
+  const headingIndex = lines.findIndex((line) => line.trim() === HEADING);
+  if (headingIndex === -1) return -1;
+  let insertAt = headingIndex + 1;
+  for (let i = headingIndex + 1; i < lines.length; i += 1) {
+    // `## ` だけでなく `### 手書きメモ` のような任意のレベルの見出しで止める。
+    // `## ` だけを見ると h3 セクションを跨いでその中に挿入してしまう。
+    if (ANY_HEADING_RE.test(lines[i])) break;
+    if (lines[i].trim() !== '') insertAt = i + 1; // 空行はセクション末尾の余白として跨がない
+  }
+  return insertAt;
+}
+
 export async function appendStudySession(date, session) {
   const { relPath, frontmatter, body } = await readRecordFile(date);
-  const trimmed = body.endsWith('\n') ? body.slice(0, -1) : body;
-  const withHeading = trimmed.includes(HEADING) ? trimmed : `${trimmed ? `${trimmed}\n` : ''}${HEADING}`;
-  const nextBody = `${withHeading}\n${formatStudySessionLine(session)}\n`;
-  await writeVaultFile(relPath, { ...frontmatter, updated: new Date().toISOString() }, nextBody);
+  const line = formatStudySessionLine(session);
+  const lines = body.split('\n');
+  const insertAt = locateSectionInsertIndex(lines);
+
+  let nextLines;
+  if (insertAt === -1) {
+    // `## セッション` が無い場合のみ、本文末尾に見出しごと追加する
+    const trimmed = body.endsWith('\n') ? body.slice(0, -1) : body;
+    nextLines = `${trimmed ? `${trimmed}\n` : ''}${HEADING}\n${line}\n`.split('\n');
+  } else {
+    nextLines = [...lines.slice(0, insertAt), line, ...lines.slice(insertAt)];
+  }
+  await writeVaultFile(relPath, { ...frontmatter, updated: new Date().toISOString() }, nextLines.join('\n'));
 }
 
 export async function updateStudySession(date, id, patch) {
@@ -1354,9 +1392,17 @@ const KINDS = ['material', 'common_test', 'secondary'];
 const UNDERSTANDINGS = ['understood', 'uncertain', 'not_understood'];
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-export function assertValidStudySessionFields({ date, subject, kind, understanding } = {}) {
+export function assertValidStudySessionFields({ date, subject, minutes, kind, understanding } = {}) {
   if (date !== undefined && !DATE_RE.test(date)) {
     throw new Error(`date must match YYYY-MM-DD: ${date}`);
+  }
+  // minutes を検査しないと 0/負数/NaN が書き込めてしまう。しかも parseStudySessions は
+  // `minutes <= 0` の行をスキップするため、「書き込みは成功したのに読めない」データ喪失になる。
+  if (minutes !== undefined) {
+    const value = Number(minutes);
+    if (!Number.isInteger(value) || value <= 0) {
+      throw new Error(`minutes must be a positive integer: ${minutes}`);
+    }
   }
   if (subject !== undefined && !STUDY_SUBJECTS.includes(subject)) {
     throw new Error(`subject must be one of the 13 known subjects: ${subject}`);
@@ -1384,7 +1430,7 @@ export async function run([date, subject, minutes, kind, understanding, memo, ye
   if (!date || !subject || !minutes || !kind || !understanding) {
     throw new Error('使い方: node helpers/record-session.mjs <date> <subject> <minutes> <kind> <understanding> <memo> [year] [section]');
   }
-  assertValidStudySessionFields({ date, subject, kind, understanding });
+  assertValidStudySessionFields({ date, subject, minutes, kind, understanding });
   const { readVaultFile, parseStudySessions, nextSessionId, appendStudySession } = await import('./vault/index.mjs');
   let existingSessions = [];
   try {
@@ -1520,7 +1566,7 @@ docs/superpowers/specs/2026-07-25-vault-dialogue-records-schedule-design.md の
   **どちらにも無ければエラーを提示し、書き込みを一切行わない**(黙って別の場所に書かない)。
 - vaultへの書き込みは、必ず`analysis/helpers/`配下のスクリプトをシェルコマンド実行
   (`node analysis/helpers/<name>.mjs ...`)で呼ぶ。ファイルを直接編集しない。
-- 各スクリプトは標準出力にJSONを1行で返す。エラー時は非ゼロ終了・標準エラーに
+- 各スクリプトは標準出力にJSONを返す(既存の `printJson` は `JSON.stringify(data, null, 2)` を使うため、1行ではなく整形された複数行JSONになる)。エラー時は非ゼロ終了・標準エラーに
   メッセージを出す。エラーになった場合は、その場でユーザーにエラー内容を提示し、
   どこまで書けたか分かるものは分かる範囲で伝える。
 - どの操作でも、最後に必ず「何を書いたか」を要約して提示する(例:
