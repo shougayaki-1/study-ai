@@ -9,3 +9,7 @@ export type { CorrectionEntry } from "./corrections";
 export { appendCorrection } from "./corrections";
 export type { StudyKind, Understanding, StudySession, StudyRecordDay } from "./study-sessions";
 export { parseStudySessions, formatStudySessionLine, readStudyRecord, listStudyRecordDates } from "./study-sessions";
+export type { ScheduleKind, ScheduleEvent } from "./schedule";
+export { parseScheduleEvents, formatScheduleEventLine, readSchedule, setScheduleEventDone } from "./schedule";
+export type { PlanStatus, PlanBlock } from "./plan";
+export { parsePlanBlocks, formatPlanBlockLine, readPlan } from "./plan";

@@ -14,5 +14,12 @@ describe("vault barrel export", () => {
     expect(typeof vault.formatStudySessionLine).toBe("function");
     expect(typeof vault.readStudyRecord).toBe("function");
     expect(typeof vault.listStudyRecordDates).toBe("function");
+    expect(typeof vault.parseScheduleEvents).toBe("function");
+    expect(typeof vault.formatScheduleEventLine).toBe("function");
+    expect(typeof vault.readSchedule).toBe("function");
+    expect(typeof vault.setScheduleEventDone).toBe("function");
+    expect(typeof vault.parsePlanBlocks).toBe("function");
+    expect(typeof vault.formatPlanBlockLine).toBe("function");
+    expect(typeof vault.readPlan).toBe("function");
   });
 });
