@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -110,5 +111,17 @@ describe("readSchedule / setScheduleEventDone", () => {
     const written = await readFile(fullPath, "utf8");
     expect([contentA, contentB]).toContain(written);
     expect(await readdir(vaultDir)).toEqual(["atomic.md"]);
+  });
+});
+
+describe("TS/Node parity", () => {
+  it("parseScheduleEvents produces the same structure in TS and Node", async () => {
+    const nodeModulePath = path.join(process.cwd(), "analysis/helpers/vault/schedule.mjs");
+    const nodeModule = (await import(pathToFileURL(nodeModulePath).href)) as {
+      parseScheduleEvents: typeof parseScheduleEvents;
+    };
+    expect(JSON.stringify(nodeModule.parseScheduleEvents(SCHEDULE_FIXTURE_BODY))).toBe(
+      JSON.stringify(parseScheduleEvents(SCHEDULE_FIXTURE_BODY))
+    );
   });
 });
