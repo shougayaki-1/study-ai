@@ -409,6 +409,10 @@ export default function StatsPage() {
         vaultレポート・弱点カルテを見る
       </Button>
 
+      <Alert severity="info" sx={{ mb: 2 }}>
+        この画面は過去データの参照用です。移行後の記録は「履歴」・「レポート」を参照してください。
+      </Alert>
+
       {configError && (
         <Alert severity="warning" sx={{ mb: 2 }}>
           {configError}

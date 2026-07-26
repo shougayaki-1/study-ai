@@ -331,6 +331,10 @@ export default function SettingsPage() {
           <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1.5 }}>
             科目・単元・教材の管理
           </Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1.5 }}>
+            この設定は分析画面(`/stats`、現在は過去データのみ表示)にのみ影響します。対話で使う科目は
+            docs/study-dialogue.md の一覧が正です。
+          </Typography>
 
           <FormControl fullWidth size="small" sx={{ mb: 1.5 }}>
             <InputLabel id="subject-select-label">科目</InputLabel>
