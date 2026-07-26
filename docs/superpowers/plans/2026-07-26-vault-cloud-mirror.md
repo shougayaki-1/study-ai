@@ -174,6 +174,9 @@ EOF
   - `export async function collectMarkdownFiles(root: string): Promise<{ path: string, content: string }[]>`(隠しファイル・隠しディレクトリ・`.md`以外を除外、pathはvaultルートからの`/`区切り相対パス、path昇順ソート)
   - `export function createVaultSyncClient(): { fetchAll(): Promise<{path,content}[]>, upsert(rows): Promise<unknown>, remove(path: string): Promise<unknown> }`
   - `export async function run(argv?: string[], opts?: { createClient?: () => ReturnType<typeof createVaultSyncClient>, root?: string }): Promise<{ dryRun: boolean, added: number, updated: number, deleted: number, addedPaths: string[], updatedPaths: string[], deletedPaths: string[] }>`
+    - 受け付ける引数: `--dry-run`(書き込まず件数と対象パスだけ返す)、`--force`(下記の安全ガードを解除する)
+    - **安全ガード**: ローカルに`.md`が1件も無いのにミラーに1件以上ある場合、`--force`が無ければ
+      throwして中断する(vaultルートの指定ミスでミラーを全消しする事故を防ぐ)。夜間バッチは`--force`を付けない。
 
 ### 判断根拠(既存コードで確認済み)
 
@@ -305,6 +308,33 @@ test('run adds a brand-new file when the mirror is empty', async (t) => {
   assert.deepEqual(result.addedPaths, ['schedule.md']);
   assert.equal(fake.store.get('schedule.md'), 'fresh');
 });
+
+test('run refuses to wipe the mirror when the vault root has no markdown files', async (t) => {
+  // vaultルートの指定ミス(空ディレクトリ)を、ミラー全削除の前に検出すること。
+  const dir = mkdtempSync(path.join(tmpdir(), 'study-ai-sync-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const fake = makeFakeVaultFilesStore();
+  fake.store.set('records/2026-07-25.md', 'existing');
+  fake.store.set('index.md', 'existing');
+
+  await assert.rejects(
+    () => run([], { createClient: () => fake.client, root: dir }),
+    /Refusing to sync/
+  );
+  assert.equal(fake.store.size, 2, 'ミラーが1件も削除されていないこと');
+});
+
+test('run --force allows emptying the mirror on purpose', async (t) => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'study-ai-sync-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const fake = makeFakeVaultFilesStore();
+  fake.store.set('records/2026-07-25.md', 'existing');
+
+  const result = await run(['--force'], { createClient: () => fake.client, root: dir });
+
+  assert.deepEqual(result.deletedPaths, ['records/2026-07-25.md']);
+  assert.equal(fake.store.size, 0);
+});
 ```
 
 2. 失敗確認コマンドと期待出力:
@@ -383,9 +413,12 @@ export function createVaultSyncClient() {
 }
 
 function parseArgv(argv) {
-  const options = { dryRun: false };
+  const options = { dryRun: false, force: false };
   for (const arg of argv) {
     if (arg === '--dry-run') options.dryRun = true;
+    // --force: index.md が無いvaultルートでも同期を続行する(安全ガードの解除)。
+    // 夜間バッチからは付けない。手動で意図的に実行するときだけ使う。
+    else if (arg === '--force') options.force = true;
   }
   return options;
 }
@@ -397,8 +430,24 @@ export async function run(argv = [], { createClient = createVaultSyncClient, roo
 
   const localEntries = await collectMarkdownFiles(vaultDir);
   const localFiles = new Map(localEntries.map((entry) => [entry.path, entry.content]));
+
   const remoteRows = await client.fetchAll();
   const remoteFiles = new Map(remoteRows.map((row) => [row.path, row.content]));
+
+  // 安全ガード: vaultルートを誤って空ディレクトリ等に向けると、planSyncはミラー側の
+  // 全行を toDelete と判定し、ミラーを全消しする。「ローカルに.mdが1つも無いのに
+  // ミラーには存在する」状態は、vaultを空にしたのではなくパス指定ミスである可能性が高い。
+  // --force を明示したときだけ続行できる(夜間バッチは --force を付けない)。
+  // 判定を localFiles.size === 0 に限定しているのは、index.md の有無のような規約依存の
+  // 条件にすると、正規のvaultでもファイル構成の変更で誤検知しうるため。
+  if (localFiles.size === 0 && remoteFiles.size > 0 && !options.force) {
+    throw new Error(
+      `vault root looks wrong: no .md files found under ${vaultDir}, ` +
+        `but the mirror holds ${remoteFiles.size} file(s). ` +
+        'Refusing to sync because this would delete every mirrored file. ' +
+        'Check STUDY_AI_VAULT_DIR, or pass --force if emptying the mirror is intentional.'
+    );
+  }
 
   const { toAdd, toUpdate, toDelete } = planSync(localFiles, remoteFiles);
   const summary = {
@@ -1365,9 +1414,9 @@ import Checkbox from "@mui/material/Checkbox";
 import { toggleScheduleEventDone } from "./_lib/actions";
 export default function ScheduleEventToggle({ id, title, initialDone, readOnly = false }: { id: string; title: string; initialDone: boolean; readOnly?: boolean }) {
   const [done, setDone] = useState(initialDone); const [isPending, startTransition] = useTransition();
-  if (readOnly) {
-    return <Checkbox size="small" checked={done} disabled inputProps={{ "aria-label": `${title}は${done ? "完了" : "未完了"}(閲覧専用)` }} />;
-  }
+  // 設計スペック「読み取り専用モード」: クラウド版では完了チェックボックスを**表示しない**。
+  // disabled で見せると「押せそうで押せない」状態になり、閲覧専用であることが伝わりにくい。
+  if (readOnly) return null;
   return <Checkbox size="small" checked={done} disabled={isPending} inputProps={{ "aria-label": `${title}を完了にする` }} onChange={() => { const next = !done; setDone(next); startTransition(async () => { try { await toggleScheduleEventDone({ id, done: next }); } catch { setDone(!next); } }); }} />;
 }
 ```
@@ -1378,7 +1427,7 @@ export default function ScheduleEventToggle({ id, title, initialDone, readOnly =
 import Box from "@mui/material/Box"; import Typography from "@mui/material/Typography"; import Paper from "@mui/material/Paper"; import Stack from "@mui/material/Stack"; import Chip from "@mui/material/Chip";
 import { readSchedule, readPlan, getVaultSource, type PlanBlock } from "@/lib/vault"; import { addDays, formatLocalDate } from "@/lib/date"; import { EVENT_KIND_COLORS, EVENT_KIND_LABELS, daysUntil } from "@/lib/constants"; import ScheduleEventToggle from "./schedule-event-toggle";
 export const dynamic = "force-dynamic"; const PLAN_WINDOW_DAYS = 7;
-export default async function SchedulePage() { const today=formatLocalDate(new Date()); const dates=Array.from({length:PLAN_WINDOW_DAYS},(_,i)=>addDays(today,i)); const readOnly=getVaultSource()==="supabase"; const [events,lists]=await Promise.all([readSchedule(),Promise.all(dates.map(readPlan))]); const upcoming=events.filter(e=>!e.done).sort((a,b)=>a.due.localeCompare(b.due)); const completed=events.filter(e=>e.done).sort((a,b)=>b.due.localeCompare(a.due)); const plans:{date:string;blocks:PlanBlock[]}[]=dates.map((date,i)=>({date,blocks:lists[i]})); return <Box sx={{p:2,pb:10,maxWidth:560,mx:"auto"}}><Typography variant="h6" fontWeight={700} sx={{mb:2}}>予定</Typography>{readOnly&&<Typography variant="caption" color="text.secondary" sx={{display:"block",mt:-1.5,mb:2}}>閲覧専用(変更はMac側の対話から)</Typography>}<Paper variant="outlined" sx={{p:2,mb:2}}><Typography variant="subtitle2" color="text.secondary" sx={{mb:1.5}}>締切リスト</Typography>{upcoming.length===0?<Typography variant="body2">予定はありません</Typography>:<Stack spacing={1}>{upcoming.map(event=>{const d=daysUntil(event.due),urgent=d<=7;return <Stack key={event.id} direction="row" alignItems="center" spacing={1} sx={{p:1,borderRadius:1.5,backgroundColor:urgent?"#fdecea":"transparent"}}><ScheduleEventToggle id={event.id} title={event.title} initialDone={event.done} readOnly={readOnly}/><Chip size="small" label={EVENT_KIND_LABELS[event.kind]??event.kind} sx={{backgroundColor:EVENT_KIND_COLORS[event.kind]??"#999",color:"#fff"}}/><Box sx={{flex:1,minWidth:0}}><Typography variant="body2" noWrap>{event.title}</Typography><Typography variant="caption" color={urgent?"error.main":"text.secondary"}>{event.due} ({d>=0?`あと${d}日`:"期限超過"})</Typography></Box></Stack>})}</Stack>}</Paper>{completed.length>0&&<Paper variant="outlined" sx={{p:2,mb:2}}><Typography variant="subtitle2" color="text.secondary">完了済み（チェックを外すと復元）</Typography>{completed.map(event=><Stack key={event.id} direction="row" alignItems="center"><ScheduleEventToggle id={event.id} title={event.title} initialDone={event.done} readOnly={readOnly}/><Typography variant="body2" sx={{textDecoration:"line-through"}}>{event.title}</Typography></Stack>)}</Paper>}<Paper variant="outlined" sx={{p:2}}><Typography variant="subtitle2" color="text.secondary">学習計画（今日から{PLAN_WINDOW_DAYS}日間）</Typography>{plans.map(({date,blocks})=><Box key={date} sx={{mt:1}}><Typography variant="caption" color="text.secondary">{date}{date===today?"（今日）":""}</Typography>{blocks.length===0?<Typography variant="body2" color="text.secondary">計画はありません</Typography>:blocks.map(b=><Stack key={b.id} direction="row" spacing={1}><Chip size="small" label={`${b.start}-${b.end}`}/><Chip size="small" label={b.subject}/><Typography variant="body2">{b.status==="done"?"完了":b.status==="skipped"?"未実施":"予定"}{b.memo?`・${b.memo}`:""}</Typography></Stack>)}</Box>)}</Paper></Box>; }
+export default async function SchedulePage() { const today=formatLocalDate(new Date()); const dates=Array.from({length:PLAN_WINDOW_DAYS},(_,i)=>addDays(today,i)); const readOnly=getVaultSource()==="supabase"; const [events,lists]=await Promise.all([readSchedule(),Promise.all(dates.map(readPlan))]); const upcoming=events.filter(e=>!e.done).sort((a,b)=>a.due.localeCompare(b.due)); const completed=events.filter(e=>e.done).sort((a,b)=>b.due.localeCompare(a.due)); const plans:{date:string;blocks:PlanBlock[]}[]=dates.map((date,i)=>({date,blocks:lists[i]})); return <Box sx={{p:2,pb:10,maxWidth:560,mx:"auto"}}><Typography variant="h6" fontWeight={700} sx={{mb:2}}>予定</Typography>{readOnly&&<Typography variant="caption" color="text.secondary" sx={{display:"block",mt:-1.5,mb:2}}>閲覧専用(変更はMac側の対話から)</Typography>}<Paper variant="outlined" sx={{p:2,mb:2}}><Typography variant="subtitle2" color="text.secondary" sx={{mb:1.5}}>締切リスト</Typography>{upcoming.length===0?<Typography variant="body2">予定はありません</Typography>:<Stack spacing={1}>{upcoming.map(event=>{const d=daysUntil(event.due),urgent=d<=7;return <Stack key={event.id} direction="row" alignItems="center" spacing={1} sx={{p:1,borderRadius:1.5,backgroundColor:urgent?"#fdecea":"transparent"}}><ScheduleEventToggle id={event.id} title={event.title} initialDone={event.done} readOnly={readOnly}/><Chip size="small" label={EVENT_KIND_LABELS[event.kind]??event.kind} sx={{backgroundColor:EVENT_KIND_COLORS[event.kind]??"#999",color:"#fff"}}/><Box sx={{flex:1,minWidth:0}}><Typography variant="body2" noWrap>{event.title}</Typography><Typography variant="caption" color={urgent?"error.main":"text.secondary"}>{event.due} ({d>=0?`あと${d}日`:"期限超過"})</Typography></Box></Stack>})}</Stack>}</Paper>{completed.length>0&&<Paper variant="outlined" sx={{p:2,mb:2}}><Typography variant="subtitle2" color="text.secondary">{readOnly?"完了済み":"完了済み（チェックを外すと復元）"}</Typography>{completed.map(event=><Stack key={event.id} direction="row" alignItems="center"><ScheduleEventToggle id={event.id} title={event.title} initialDone={event.done} readOnly={readOnly}/><Typography variant="body2" sx={{textDecoration:"line-through"}}>{event.title}</Typography></Stack>)}</Paper>}<Paper variant="outlined" sx={{p:2}}><Typography variant="subtitle2" color="text.secondary">学習計画（今日から{PLAN_WINDOW_DAYS}日間）</Typography>{plans.map(({date,blocks})=><Box key={date} sx={{mt:1}}><Typography variant="caption" color="text.secondary">{date}{date===today?"（今日）":""}</Typography>{blocks.length===0?<Typography variant="body2" color="text.secondary">計画はありません</Typography>:blocks.map(b=><Stack key={b.id} direction="row" spacing={1}><Chip size="small" label={`${b.start}-${b.end}`}/><Chip size="small" label={b.subject}/><Typography variant="body2">{b.status==="done"?"完了":b.status==="skipped"?"未実施":"予定"}{b.memo?`・${b.memo}`:""}</Typography></Stack>)}</Box>)}</Paper></Box>; }
 ```
 
 7. 検証コマンドと期待結果:
@@ -1398,7 +1447,7 @@ git commit -m "$(cat <<'EOF'
 feat(schedule): make /schedule read-only when STUDY_AI_VAULT_SOURCE=supabase
 
 toggleScheduleEventDone はクラウドミラー時に throw して書き込みを拒否し、
-完了チェックボックスは disabled 表示になる。閲覧専用である旨の注記を追加する。
+完了チェックボックスは表示しない。閲覧専用である旨の注記を追加する。
 
 Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
 EOF
@@ -1417,9 +1466,31 @@ EOF
 
 このタスクはTDDが馴染まない(プロンプト文書)。全文(置き換え箇所)を掲載する。同期失敗が夜間バッチ全体を落とさないことを明記する。
 
+**重要**: `analysis/nightly.md`の冒頭付近(作業ディレクトリの制約を述べている段落)に
+**「Supabaseへは一切アクセスしない」**という記述がある。Task 3で同期スクリプトを追加すると
+この記述と矛盾するため、**第7節だけでなくこの冒頭の記述も更新する**(ステップ1で対応)。
+
 ### ステップ
 
-1. `analysis/nightly.md`の`### 7. ラン完了`セクション(既存の手順1〜3)を、以下に置き換える:
+1. `analysis/nightly.md`の冒頭付近にある次の記述を修正する。
+
+変更前:
+
+```md
+**Supabaseへは一切アクセスしない**(勉強時間の手入力などは
+Web側が引き続きSupabaseを使うが、夜間バッチの担当外)。
+```
+
+変更後:
+
+```md
+**Supabaseへは、手順7のvaultミラー同期(`sync-vault-to-supabase.mjs`)を除いて
+アクセスしない。** その同期は`vault/`の`.md`を読み取り専用ミラーへ一方向にコピーする
+だけで、Supabaseから読んで判断材料にすることはない(分析の入力は`vault/`のみ)。
+勉強記録・予定の手入力はWeb/対話側の担当で、夜間バッチの担当外。
+```
+
+2. `analysis/nightly.md`の`### 7. ラン完了`セクション(既存の手順1〜3)を、以下に置き換える:
 
 ```md
 ### 7. ラン完了
@@ -1457,14 +1528,20 @@ EOF
    `error`にしない**。手順1〜6のいずれかで回復不能なエラーが起きた場合のみ`error`にする)。
 ```
 
-2. 検証コマンドと期待結果:
+3. 検証コマンドと期待結果:
 
 ```bash
 grep -n "sync-vault-to-supabase.mjs\|後続の手順.*止めない\|status.*ok.*のまま" analysis/nightly.md
 ```
 期待結果: 3パターンとも1回以上マッチする(同期ステップの追加と、失敗時にバッチ全体を落とさない旨の記述が確認できる)。
 
-3. commit:
+```bash
+grep -n "一切アクセスしない" analysis/nightly.md
+```
+期待結果: 1件だけマッチし、その行が「手順7のvaultミラー同期を除いて」という例外つきの記述に
+なっていること(ステップ1の修正が反映され、矛盾が解消されていること)。
+
+4. commit:
 
 ```bash
 git add analysis/nightly.md
@@ -1559,9 +1636,22 @@ STUDY_AI_VAULT_SOURCE=
 4. 検証コマンドと期待結果:
 
 ```bash
-grep -c "SUPABASE_SERVICE_ROLE_KEY\|VAPID\|CRON_SECRET" README.md .env.local.example
+grep -c "VAPID\|CRON_SECRET" README.md .env.local.example
 ```
-期待結果: 両ファイルとも`0`(廃止済みの記述が残っていないこと)。
+期待結果: 両ファイルとも`0`(Phase 2で廃止したプッシュ通知・cronの記述が残っていないこと)。
+
+```bash
+grep -n "SUPABASE_SERVICE_ROLE_KEY" README.md
+```
+期待結果: **1回以上マッチする。** このキーは廃止されていない(Mac上の同期スクリプトが使う)。
+READMEには「Vercelには設定しない」という安全上の注意として**意図的に登場させる**ので、
+`VAPID`/`CRON_SECRET`と同じ「0件であること」を期待してはならない。
+
+```bash
+grep -c "SUPABASE_SERVICE_ROLE_KEY" .env.local.example
+```
+期待結果: `0`。`.env.local.example`はWeb(ブラウザ/Vercel)向けのテンプレートであり、
+`service_role`キーはここに書かない(置いてよいのは`analysis/.env`のみ)。
 
 ```bash
 grep -n "STUDY_AI_VAULT_SOURCE" README.md .env.local.example
