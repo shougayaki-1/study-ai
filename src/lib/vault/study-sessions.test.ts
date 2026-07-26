@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { listStudyRecordDates, parseStudySessions, formatStudySessionLine, readStudyRecord, type StudySession } from "./study-sessions";
 
@@ -74,5 +75,13 @@ describe("readStudyRecord / listStudyRecordDates", () => {
     const dir = path.join(vaultDir, "records"); await mkdir(dir, { recursive: true });
     await writeFile(path.join(dir, "2026-07-25.md"), "", "utf8"); await writeFile(path.join(dir, "2026-07-25 (1).md"), "", "utf8"); await writeFile(path.join(dir, "notes.txt"), "", "utf8");
     expect(await listStudyRecordDates()).toEqual(["2026-07-25"]);
+  });
+});
+
+describe("TS/Node parity", () => {
+  it("parses the shared study-record fixture identically in both implementations", async () => {
+    const nodeModulePath = path.join(REPO_ROOT, "analysis/helpers/vault/study-sessions.mjs");
+    const nodeModule = await import(pathToFileURL(nodeModulePath).href);
+    expect(JSON.stringify(nodeModule.parseStudySessions(BODY))).toBe(JSON.stringify(parseStudySessions(BODY)));
   });
 });
