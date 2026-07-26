@@ -45,9 +45,16 @@ staging・本番への適用順は [`docs/stability-rollout.md`](./docs/stabilit
 ## 実装状況
 
 - Next.js 15 (App Router / TypeScript) + MUI(ライトテーマ固定・ミニマル)
-- 下部固定タブ5つ: 今日(`/`) / 記録(`/record`) / 分析(`/stats`) / 予定(`/schedule`) / 設定(`/settings`)
-- 今日・記録・履歴・分析・予定・設定の主要画面を実装
-- 学習記録・予定・教材単元対応はDB関数で原子的に保存
+- ナビゲーション: モバイルは下部固定タブ4つ(今日(`/`) / 履歴(`/records`) / 分析(`/stats`) / 予定(`/schedule`))
+  + 右下メニューから レポート(`/reports`) / カルテ(`/karte`) / 設定(`/settings`)。
+  デスクトップは左サイドバーに7項目すべてを表示
+- 記録・予定・学習計画の入力画面は持たない(Phase 2 で `/record` を廃止)。入力は
+  Claude Code / Codex CLI との対話から vault の Markdown に書き込む方式
+  ([`docs/study-dialogue.md`](./docs/study-dialogue.md))。Webは表示が主で、書き込みは
+  `/schedule` の完了チェック(ローカル実行時のみ)に限られる
+- 今日・履歴・予定・レポート・カルテの各画面はvault(`vault/`配下のMarkdown)を読んで表示する
+- 分析画面 `/stats` は Phase 2 で凍結済み。移行日以前のSupabaseデータのみを表示し、
+  新規の記録は反映されない(分析の主役は夜間バッチが書く`reports/`と弱点カルテ)
 - ローカルDB再構築、型生成一致、ユニットテスト、Playwright E2E、CIを整備
 - Supabase Auth(メールログイン、`/login`)+ middleware による未認証リダイレクト
 - `supabase/schema.sql` / `supabase/seed.sql`(科目13 + 単元マスタ)
@@ -75,6 +82,8 @@ vaultを直接読まず、Supabaseの`vault_files`テーブル(夜間バッチ�
 3. `vercel.json`は`{}`のままでよい(cronは追加しない。追加のビルド設定は不要)。
 4. デプロイ後、クラウド版の`/schedule`は閲覧専用になる(完了チェックボックスは表示されない)。
    予定・記録・カルテの変更はMac上の対話(`docs/study-dialogue.md`)から行う。
+   また、`/settings`の「夜間分析バッチの起動プロンプト」はクラウド版では表示できない
+   (`analysis/nightly.md`がデプロイに同梱されないためエラー表示になる)。夜間バッチはMac上でのみ実行する。
 
 ### iPhoneでの利用手順
 
