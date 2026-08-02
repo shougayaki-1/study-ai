@@ -143,3 +143,25 @@ test('run --force allows emptying the mirror on purpose', async (t) => {
   assert.deepEqual(result.deletedPaths, ['records/2026-07-25.md']);
   assert.equal(fake.store.size, 0);
 });
+
+test('shouldSyncFile は .md と data/derived直下のJSONだけを同期対象にする', async () => {
+  const { shouldSyncFile } = await import('../helpers/sync-vault-to-supabase.mjs');
+  assert.equal(shouldSyncFile('index.md'), true);
+  assert.equal(shouldSyncFile('subjects/化学基礎/弱点カルテ.md'), true);
+  assert.equal(shouldSyncFile('data/derived/skills-化学基礎.json'), true);
+  assert.equal(shouldSyncFile('data/attempts.jsonl'), false);
+  assert.equal(shouldSyncFile('data/derived/nested/x.json'), false);
+  assert.equal(shouldSyncFile('data/other.json'), false);
+  assert.equal(shouldSyncFile('_archive/2026/08/a.pdf'), false);
+});
+
+test('collectMarkdownFiles は derived JSON を含め attempts.jsonl を除外する', async (t) => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'study-ai-sync-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  await mkdir(path.join(dir, 'data', 'derived'), { recursive: true });
+  await writeFile(path.join(dir, 'index.md'), 'index', 'utf8');
+  await writeFile(path.join(dir, 'data', 'attempts.jsonl'), '{}\n', 'utf8');
+  await writeFile(path.join(dir, 'data', 'derived', 'skills-化学基礎.json'), '{}', 'utf8');
+  const files = await collectMarkdownFiles(dir);
+  assert.deepEqual(files.map((file) => file.path), ['data/derived/skills-化学基礎.json', 'index.md']);
+});

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// vault/ 配下の .md ファイルを Supabase の vault_files (読み取り専用ミラー) へ
+// vault/ 配下の .md とWeb用derived JSONを Supabase の vault_files へ
 // 一方向同期する。夜間バッチの最終ステップから呼ばれる(analysis/nightly.md 手順7参照)。
 // 変更があったファイルだけ upsert し、vault から消えたファイルはミラーからも削除する。
 import { fileURLToPath } from 'node:url';
@@ -9,6 +9,14 @@ import { loadEnv, printJson, restClient } from './lib.mjs';
 import { vaultRoot } from './vault/root.mjs';
 
 const PAGE_SIZE = 500;
+export const DERIVED_REL_DIR = 'data/derived';
+
+export function shouldSyncFile(relPath) {
+  const normalized = relPath.split(path.sep).join('/');
+  if (normalized.endsWith('.md')) return true;
+  if (!normalized.endsWith('.json')) return false;
+  return normalized.slice(0, normalized.lastIndexOf('/')) === DERIVED_REL_DIR;
+}
 
 export function planSync(localFiles, remoteFiles) {
   const toAdd = [];
@@ -34,7 +42,7 @@ export async function collectMarkdownFiles(root) {
       const full = path.join(dirFull, entry.name);
       if (entry.isDirectory()) {
         await walk(full, rel);
-      } else if (entry.isFile() && entry.name.endsWith('.md')) {
+      } else if (entry.isFile() && shouldSyncFile(rel)) {
         const content = await readFile(full, 'utf8');
         results.push({ path: rel, content });
       }
