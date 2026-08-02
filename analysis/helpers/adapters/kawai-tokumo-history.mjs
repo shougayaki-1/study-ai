@@ -1,7 +1,13 @@
 // 河合「教科学習結果 > 学習履歴」PDF の決定的アダプタ。
 // 純関数部は実PDFなしで検証できるよう外部コマンド層と分離する。
 
+import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { attemptId } from '../vault/attempts.mjs';
+import { parsePpm, sampleRect } from './ppm.mjs';
 
 export const ADAPTER = { name: 'kawai-tokumo-history', version: '1.0.0', method: 'deterministic' };
 export const SOURCE_SYSTEM = 'kawai';
@@ -185,4 +191,88 @@ export function toAttempts({ rows, marks, page, artifactRef, artifactSha256, ing
       note: null,
     };
   });
+}
+
+const RENDER_DPI = 150;
+
+function run(command, args) {
+  return execFileSync(command, args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+}
+
+function pageCount(file) {
+  const match = /Pages:\s+(\d+)/.exec(run('pdfinfo', [file]));
+  if (!match) throw new Error(`pdfinfo がページ数を返しませんでした: ${file}`);
+  return Number(match[1]);
+}
+
+function decodeXmlEntities(text) {
+  return text
+    .replace(/&#(\d+);/g, (_, value) => String.fromCodePoint(Number(value)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, value) => String.fromCodePoint(Number.parseInt(value, 16)))
+    .replaceAll('&lt;', '<')
+    .replaceAll('&gt;', '>')
+    .replaceAll('&quot;', '"')
+    .replaceAll('&apos;', "'")
+    .replaceAll('&amp;', '&');
+}
+
+function wordsOf(file, page) {
+  const xml = run('pdftotext', ['-bbox-layout', '-f', String(page), '-l', String(page), file, '-']);
+  const words = [];
+  const pattern = /<word xMin="(-?[\d.]+)" yMin="(-?[\d.]+)" xMax="(-?[\d.]+)" yMax="(-?[\d.]+)">([^<]*)<\/word>/g;
+  let match;
+  while ((match = pattern.exec(xml)) !== null) {
+    words.push({
+      x0: Number(match[1]), y0: Number(match[2]), x1: Number(match[3]), y1: Number(match[4]),
+      t: decodeXmlEntities(match[5]),
+    });
+  }
+  return words;
+}
+
+function renderPage(file, page) {
+  const dir = mkdtempSync(path.join(tmpdir(), 'kawai-ppm-'));
+  try {
+    const prefix = path.join(dir, 'page');
+    execFileSync('pdftoppm', ['-r', String(RENDER_DPI), '-f', String(page), '-l', String(page), file, prefix], {
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    const rendered = readdirSync(dir).find((name) => name.endsWith('.ppm'));
+    if (!rendered) throw new Error(`pdftoppm がページ ${page} の PPM を生成しませんでした`);
+    return parsePpm(readFileSync(path.join(dir, rendered)));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+export function detect(file) {
+  return detectFromText(run('pdftotext', ['-f', '1', '-l', '1', file, '-']));
+}
+
+export async function extract({ file, artifactRef, ingestedAt }) {
+  const artifactSha256 = createHash('sha256').update(readFileSync(file)).digest('hex');
+  const pages = pageCount(file);
+  const scale = RENDER_DPI / 72;
+  const attempts = [];
+  let unknownMarks = 0;
+
+  for (let page = 1; page <= pages; page += 1) {
+    const rows = parseRows(wordsOf(file, page));
+    if (rows.length === 0) continue;
+
+    const image = renderPage(file, page);
+    const marks = rows.map((row) => classifyMark(sampleRect(image, {
+      x0: (row.markRect.x0 - 3) * scale,
+      y0: row.markRect.y0 * scale,
+      x1: (row.markRect.x1 + 3) * scale,
+      y1: row.markRect.y1 * scale,
+    })));
+    unknownMarks += marks.filter((mark) => mark === 'unknown').length;
+    attempts.push(...toAttempts({ rows, marks, page, artifactRef, artifactSha256, ingestedAt }));
+  }
+
+  if (attempts.length === 0) {
+    throw new Error(`${artifactRef}: 河合形式と判定されたのに1行も抽出できませんでした。フォーマットが変更された可能性があります。`);
+  }
+  return { attempts, unknownMarks, pages };
 }
