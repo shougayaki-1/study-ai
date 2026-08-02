@@ -198,3 +198,24 @@ launchctl load ~/Library/LaunchAgents/com.studyai.nightly.plist
   コピーミスがないか確認する。
 - `Supabase REST ... failed: 42501` (RLS違反) 等が出る場合、`service_role` キーではなく
   `anon` キーを使っている可能性が高い。`service_role` キーはRLSをバイパスする。
+
+## 設問レベル記録 (attempts)
+
+`vault/data/attempts.jsonl` に設問1件＝1行で蓄積する。仕様は
+`docs/superpowers/specs/2026-08-02-question-level-attempts-design.md`。
+
+```bash
+# 原本1件を取り込む（既知形式でなければ adapter:null を返して正常終了）
+node analysis/helpers/ingest-artifact.mjs "_archive/2026/08/20260801-tokuMo-Geo-1.pdf"
+
+# _archive/ を遡って取り込む（冪等。何度実行してもよい）
+node analysis/helpers/backfill-attempts.mjs
+
+# 書き込まずに形式判定・抽出件数を確認する
+node analysis/helpers/backfill-attempts.mjs --dry-run
+
+# 派生物 (data/derived/skills-*.json) を再生成する
+node analysis/helpers/build-skills.mjs
+```
+
+`unknownMarks` が1件でもあれば、色判定に失敗している。要確認TODOへ回すこと。
