@@ -12,6 +12,8 @@ describe("listKarteSubjects", () => {
     vaultDir = await mkdtemp(path.join(tmpdir(), "study-ai-vault-"));
     await mkdir(path.join(vaultDir, "subjects", "日本史"), { recursive: true });
     await mkdir(path.join(vaultDir, "subjects", "世界史"), { recursive: true });
+    await mkdir(path.join(vaultDir, "data", "derived"), { recursive: true });
+    await writeFile(path.join(vaultDir, "data", "derived", "skills-化学基礎.json"), "{}", "utf-8");
     await writeFile(path.join(vaultDir, "subjects", "not-a-subject.md"), "stray file", "utf-8");
     process.env.STUDY_AI_VAULT_DIR = vaultDir;
   });
@@ -22,12 +24,12 @@ describe("listKarteSubjects", () => {
   });
 
   it("lists subject directory names, ignoring stray files", async () => {
-    expect(await listKarteSubjects()).toEqual(["世界史", "日本史"]);
+    expect(await listKarteSubjects()).toEqual(["世界史", "化学基礎", "日本史"]);
   });
 
   it("returns an empty array when the subjects directory does not exist", async () => {
     await rm(path.join(vaultDir, "subjects"), { recursive: true, force: true });
-    expect(await listKarteSubjects()).toEqual([]);
+    expect(await listKarteSubjects()).toEqual(["化学基礎"]);
   });
 });
 
@@ -37,15 +39,18 @@ describe("listKarteSubjectsFromSupabase", () => {
       selectByPath: async () => null,
       selectByPrefix: async () => [],
       selectPathsByPrefix: async (prefix: string) => {
-        expect(prefix).toBe("subjects/");
-        return [
-          "subjects/日本史/弱点カルテ.md",
-          "subjects/日本史/誤答ログ.md",
-          "subjects/世界史/弱点カルテ.md",
-          "subjects/not-a-subject.md",
-        ];
+        if (prefix === "subjects/") {
+          return [
+            "subjects/日本史/弱点カルテ.md",
+            "subjects/日本史/誤答ログ.md",
+            "subjects/世界史/弱点カルテ.md",
+            "subjects/not-a-subject.md",
+          ];
+        }
+        expect(prefix).toBe("data/derived/skills-");
+        return ["data/derived/skills-化学基礎.json"];
       },
     };
-    expect(await listKarteSubjectsFromSupabase(client)).toEqual(["世界史", "日本史"]);
+    expect(await listKarteSubjectsFromSupabase(client)).toEqual(["世界史", "化学基礎", "日本史"]);
   });
 });

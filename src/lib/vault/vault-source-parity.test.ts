@@ -82,4 +82,19 @@ describe("fs/supabase parity", () => {
     );
     expect(supabaseResult).toEqual(fsResult);
   });
+
+  it("readVaultFile: fs and Supabase return the same derived skills JSON", async () => {
+    const relPath = "data/derived/skills-化学基礎.json";
+    const raw = JSON.stringify({
+      schema_version: 1,
+      subject: "化学基礎",
+      generated_at: "2026-08-02T03:00:00+09:00",
+      topics: [],
+    });
+    await mkdir(path.join(vaultDir, "data", "derived"), { recursive: true });
+    await writeFile(path.join(vaultDir, relPath), raw, "utf8");
+    const fsResult = await readVaultFile(relPath);
+    const supabaseResult = await readVaultFileFromSupabase(relPath, fakeClient({ [relPath]: raw }));
+    expect(supabaseResult).toEqual(fsResult);
+  });
 });

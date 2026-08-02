@@ -23,3 +23,5 @@ export type { ScheduleKind, ScheduleEvent } from "./schedule";
 export { parseScheduleEvents, formatScheduleEventLine, readSchedule, setScheduleEventDone } from "./schedule";
 export type { PlanStatus, PlanBlock } from "./plan";
 export { parsePlanBlocks, formatPlanBlockLine, readPlan } from "./plan";
+export type { SkillState, SkillAttempt, SkillTopic, SkillsFile } from "./skills";
+export { readSkills, skillsRelPath, DERIVED_REL_DIR } from "./skills";

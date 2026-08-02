@@ -9,6 +9,9 @@ export function parseVaultFileContent(
   relPath: string,
   content: string
 ): { frontmatter: Record<string, unknown>; body: string; raw: string } {
+  if (relPath.endsWith(".json")) {
+    return { frontmatter: {}, body: content, raw: content };
+  }
   const { frontmatter, body } = parseFrontmatter(content);
   const schemaVersion = frontmatter.schema_version;
   if (schemaVersion !== undefined && schemaVersion !== 1) {
