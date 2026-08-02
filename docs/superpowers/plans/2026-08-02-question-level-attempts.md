@@ -249,9 +249,23 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 **調査結果記入欄（実装者が埋めること）:**
 
-> 原因:
-> 対処:
-> 再発防止:
+> 原因: `analysis/tmp/nightly-20260716.log` から `nightly-20260801.log` まで、
+> launchd の全実行が `/bin/bash: .../analysis/run-nightly.sh: Operation not permitted`
+> で終了しており、`start-run.mjs` を含む正規バッチが起動していなかった。
+> その一方で `reports/daily/2026-07-31.md` と `2026-08-01.md` はそれぞれ
+> `2026-08-01T14:06:24.513Z`、`2026-08-01T14:19:41.520Z` に生成されているため、
+> 2日分を正規バッチ外の手動処理で後追い生成し、レポート作成だけが行われたと判断した。
+> `.lock` は存在せず、ロック競合やクラッシュ残骸は原因ではない。
+>
+> 対処: launchd からリポジトリ内スクリプトを実行できるよう、実行元アプリ/シェルに
+> macOS の必要なファイルアクセス権を付与したうえで、必ず
+> `analysis/run-nightly.sh` を入口として実行する。手動実行でも同スクリプトを使い、
+> `start-run.mjs` から `finish-run.mjs` までの正規フローを通す。
+>
+> 再発防止: 翌朝はレポートの有無だけでなく、同日付の `runs/YYYY-MM-DD.md` と
+> `analysis/tmp/nightly-YYYYMMDD.log` を対で確認する。ログが
+> `Operation not permitted` の場合はレポートを手動で単独生成せず、起動権限を直して
+> 正規バッチを再実行する。
 
 ---
 
