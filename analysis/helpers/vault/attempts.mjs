@@ -44,7 +44,8 @@ function sortObject(value) {
 }
 
 function canonical(attempt) {
-  const { ingested_at: _ignored, ...rest } = attempt;
+  const rest = { ...attempt };
+  delete rest.ingested_at;
   return JSON.stringify(sortObject(rest));
 }
 
