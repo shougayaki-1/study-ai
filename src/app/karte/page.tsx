@@ -4,7 +4,7 @@ import Stack from "@mui/material/Stack";
 import Paper from "@mui/material/Paper";
 import Alert from "@mui/material/Alert";
 import Link from "next/link";
-import { listKarteSubjects } from "./_lib/list-subjects";
+import { listKarteSubjects } from "@/lib/karte/list-subjects";
 
 export const dynamic = "force-dynamic";
 
