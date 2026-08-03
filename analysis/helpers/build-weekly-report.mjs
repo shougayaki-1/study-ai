@@ -36,9 +36,11 @@ export async function run([weekStr, dataPathOrDash]) {
   const frontmatter = buildWeeklyReportFrontmatter(weekStr, updatedAt);
   const body = buildWeeklyReportBody({ week: weekStr, sections });
   const { writeVaultFile } = await import('./vault/index.mjs');
+  const { writeReportChartFile } = await import('./report-charts.mjs');
   const relPath = `reports/weekly/${weekStr}.md`;
   await writeVaultFile(relPath, frontmatter, body);
-  return { path: relPath };
+  const chartPath = await writeReportChartFile(relPath, sections);
+  return { path: relPath, chartPath };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

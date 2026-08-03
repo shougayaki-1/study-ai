@@ -58,9 +58,11 @@ export async function run([dateStr, dataPathOrDash]) {
   const frontmatter = buildDailyReportFrontmatter(dateStr, confirmTodos, updatedAt);
   const body = buildDailyReportBody({ date: dateStr, confirmTodos, sections });
   const { writeVaultFile } = await import('./vault/index.mjs');
+  const { writeReportChartFile } = await import('./report-charts.mjs');
   const relPath = `reports/daily/${dateStr}.md`;
   await writeVaultFile(relPath, frontmatter, body);
-  return { path: relPath, confirm_todos: confirmTodos.length };
+  const chartPath = await writeReportChartFile(relPath, sections);
+  return { path: relPath, confirm_todos: confirmTodos.length, chartPath };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
