@@ -1,8 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { AppRouterCacheProvider } from "@mui/material-nextjs/v15-appRouter";
-import Box from "@mui/material/Box";
 import "./globals.css";
-import BottomNav from "@/components/BottomNav";
 import ThemeRegistry from "@/components/ThemeRegistry";
 import ServiceWorkerRegister from "@/components/ServiceWorkerRegister";
 
@@ -41,14 +39,7 @@ export default function RootLayout({
     <html lang="ja" suppressHydrationWarning>
       <body>
         <AppRouterCacheProvider options={{ enableCssLayer: false }}>
-          <ThemeRegistry>
-            <Box sx={{ display: "flex" }}>
-              <BottomNav />
-              <Box component="main" sx={{ flexGrow: 1, minWidth: 0 }}>
-                {children}
-              </Box>
-            </Box>
-          </ThemeRegistry>
+          <ThemeRegistry>{children}</ThemeRegistry>
         </AppRouterCacheProvider>
         <ServiceWorkerRegister />
       </body>
