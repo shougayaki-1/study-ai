@@ -9,6 +9,7 @@ import Link from "next/link";
 import { readPlan, readSchedule, listReports } from "@/lib/vault";
 import { COMMON_TEST_DATE, daysUntil, EVENT_KIND_LABELS } from "@/lib/constants";
 import { formatLocalDate } from "@/lib/date";
+import { collectWeakTopics } from "@/lib/karte/weak-topics";
 
 export const dynamic = "force-dynamic";
 
@@ -17,10 +18,11 @@ const UPCOMING_DUE_WITHIN_DAYS = 7;
 export default async function HomePage() {
   const today = formatLocalDate(new Date());
   const daysToExam = daysUntil(COMMON_TEST_DATE);
-  const [planBlocks, scheduleEvents, dailyReports] = await Promise.all([
+  const [planBlocks, scheduleEvents, dailyReports, weakTopics] = await Promise.all([
     readPlan(today),
     readSchedule(),
     listReports("daily"),
+    collectWeakTopics(5),
   ]);
   const incompleteEvents = scheduleEvents.filter((event) => !event.done);
   const overdueEvents = incompleteEvents.filter((event) => daysUntil(event.due) < 0).sort((a, b) => a.due.localeCompare(b.due));
@@ -65,6 +67,44 @@ export default async function HomePage() {
               </Box>
             </Stack>)}
           </Stack>}
+        </Paper>
+
+        <Paper variant="outlined" sx={{ p: 2 }}>
+          <Typography
+            variant="subtitle2"
+            color="text.secondary"
+            sx={{ mb: 1 }}
+          >
+            弱点ハイライト
+          </Typography>
+          {weakTopics.length === 0 ? (
+            <Typography variant="body2" color="text.secondary">
+              学習状態データがまだありません
+            </Typography>
+          ) : (
+            <Stack spacing={1}>
+              {weakTopics.map((entry) => (
+                <Stack
+                  key={`${entry.subjectKey}-${entry.topic.key}`}
+                  component={Link}
+                  href={`/karte/${encodeURIComponent(entry.subjectKey)}`}
+                  direction="row"
+                  alignItems="center"
+                  justifyContent="space-between"
+                  sx={{ textDecoration: "none", color: "inherit" }}
+                >
+                  <Box>
+                    <Typography variant="body2">{entry.topic.name}</Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {entry.subjectKey}・{entry.topic.correct}/
+                      {entry.topic.attempts}
+                    </Typography>
+                  </Box>
+                  <Chip size="small" color="error" label="弱い" />
+                </Stack>
+              ))}
+            </Stack>
+          )}
         </Paper>
 
         <Paper variant="outlined" sx={{ p: 2 }}>
