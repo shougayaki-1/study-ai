@@ -200,21 +200,32 @@ Node標準機能のみで完結する)。**Supabaseへは、手順7のvaultミ�
 2. `node analysis/helpers/build-daily-report.mjs "$TODAY" analysis/tmp/daily-report-data.json`
    を実行し、`reports/daily/$TODAY.md`を生成する(冒頭に「## 要確認TODO」が自動で入る)。
 3. **実行日が日曜日の場合**、追加で週次総括を作成する:
+   - 今日のISO週番号(`YYYY-Www`、例:`2026-W30`)を`WEEK`とし、
+     `node analysis/helpers/compute-weekly-study-minutes.mjs "$WEEK"`を実行して、
+     その週(月〜日)の科目別合計学習時間(分)を`{"type":"bar","unit":"分","series":[...]}`
+     の形で取得する。
    - 直近7日分の`reports/daily/*.md`(`node analysis/helpers/read-vault-file.mjs`で
      日付ごとに読む)を踏まえ、学習時間推移・弱点の変化・来週の重点科目をまとめる。
    - `analysis/tmp/weekly-report-data.json`を作成する。形式:
      ```json
      {
        "sections": [
-         { "heading": "学習時間推移", "body": "平均105分/日、前週比+10分。..." },
+         {
+           "heading": "学習時間推移",
+           "body": "平均105分/日、前週比+10分。...",
+           "chart": { "type": "bar", "unit": "分", "series": [{ "label": "英語R", "value": 360 }] }
+         },
          { "heading": "弱点の変化", "body": "数学: 計算ミスが減少傾向。..." },
          { "heading": "来週の重点科目", "body": "日本史(直近の誤答が集中)、数学(検算習慣)" }
        ]
      }
      ```
-   - 今日のISO週番号(`YYYY-Www`、例:`2026-W30`)を`WEEK`として、
-     `node analysis/helpers/build-weekly-report.mjs "$WEEK" analysis/tmp/weekly-report-data.json`
-     を実行し、`reports/weekly/$WEEK.md`を保存する。
+     `学習時間推移`セクションの`chart`には、直前で計算した
+     `compute-weekly-study-minutes.mjs`の出力をそのまま入れる。他のセクションに
+     `chart`を付けるかどうかは任意で、数値の根拠が明確な場合だけ付ける。
+   - `node analysis/helpers/build-weekly-report.mjs "$WEEK" analysis/tmp/weekly-report-data.json`
+     を実行し、`reports/weekly/$WEEK.md`と、`chart`を含むセクションがあれば
+     `reports/weekly/$WEEK.chart.json`を保存する。
 
 ### 7. ラン完了
 
