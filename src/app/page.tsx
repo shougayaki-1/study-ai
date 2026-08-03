@@ -33,7 +33,7 @@ export default async function HomePage() {
   const latestDailyReport = dailyReports[0] ?? null;
 
   return (
-    <Box sx={{ p: 2, pb: 4, maxWidth: 560, mx: "auto" }}>
+    <Box sx={{ p: 2, pb: 4, maxWidth: { xs: 560, md: 960 }, mx: "auto" }}>
       <Typography variant="h6" fontWeight={700} sx={{ mb: 2 }}>今日</Typography>
       <Stack spacing={2}>
         <Paper variant="outlined" sx={{ p: 2 }}>

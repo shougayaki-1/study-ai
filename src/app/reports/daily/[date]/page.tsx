@@ -43,7 +43,7 @@ export default async function DailyReportPage({
   const nextDate = addDays(date, 1);
 
   return (
-    <Box sx={{ p: 2, pb: 10, maxWidth: 560, mx: "auto" }}>
+    <Box sx={{ p: 2, pb: 10, maxWidth: { xs: 560, md: 960 }, mx: "auto" }}>
       <Stack
         direction="row"
         alignItems="center"

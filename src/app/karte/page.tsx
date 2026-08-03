@@ -17,7 +17,7 @@ export default async function KartePage() {
     summaries = await buildSubjectSummaries();
   } catch {
     return (
-      <Box sx={{ p: 2, pb: 10, maxWidth: 560, mx: "auto" }}>
+      <Box sx={{ p: 2, pb: 10, maxWidth: { xs: 560, md: 960 }, mx: "auto" }}>
         <Typography variant="h6" fontWeight={700} sx={{ mb: 2 }}>
           学習状態
         </Typography>
@@ -30,7 +30,7 @@ export default async function KartePage() {
   }
 
   return (
-    <Box sx={{ p: 2, pb: 10, maxWidth: 560, mx: "auto" }}>
+    <Box sx={{ p: 2, pb: 10, maxWidth: { xs: 560, md: 960 }, mx: "auto" }}>
       <Typography variant="h6" fontWeight={700} sx={{ mb: 2 }}>
         学習状態
       </Typography>
